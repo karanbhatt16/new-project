@@ -1,0 +1,158 @@
+import 'package:flutter/material.dart';
+
+import '../../auth/local_auth_controller.dart';
+import 'signup_page.dart';
+
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key, required this.controller});
+
+  final LocalAuthController controller;
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  String? _error;
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+
+    final err = widget.controller.signIn(
+      email: _emailController.text,
+      password: _passwordController.text,
+    );
+
+    setState(() {
+      _submitting = false;
+      _error = err;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'vibeU',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.displaySmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -1,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    side: BorderSide(color: theme.colorScheme.outlineVariant),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextFormField(
+                            controller: _emailController,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                            ),
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) return 'Enter email';
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Password',
+                            ),
+                            validator: (v) {
+                              if (v == null || v.isEmpty) return 'Enter password';
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          if (_error != null) ...[
+                            Text(
+                              _error!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.error,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          FilledButton(
+                            onPressed: _submitting ? null : _login,
+                            child: Text(_submitting ? 'Logging in…' : 'Log in'),
+                          ),
+                          const SizedBox(height: 10),
+                          TextButton(
+                            onPressed: _submitting
+                                ? null
+                                : () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => SignupPage(
+                                          controller: widget.controller,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                            child: const Text("Don't have an account? Sign up"),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Campus-only • Safe • Respectful',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
