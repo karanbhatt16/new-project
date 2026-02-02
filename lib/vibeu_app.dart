@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'auth/auth_gate.dart';
 import 'auth/local_auth_controller.dart';
 import 'social/social_graph_controller.dart';
+import 'chat/chat_controller.dart';
 
 class VibeUApp extends StatefulWidget {
   const VibeUApp({super.key});
@@ -14,6 +15,7 @@ class VibeUApp extends StatefulWidget {
 class _VibeUAppState extends State<VibeUApp> {
   final _auth = LocalAuthController();
   final _social = SocialGraphController();
+  final _chat = ChatController();
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +28,7 @@ class _VibeUAppState extends State<VibeUApp> {
         useMaterial3: true,
         colorScheme: colorScheme,
       ),
-      home: AuthGate(controller: _auth, social: _social),
+      home: AuthGate(controller: _auth, social: _social, chat: _chat),
     );
   }
 }

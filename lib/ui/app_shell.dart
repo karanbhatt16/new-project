@@ -8,6 +8,7 @@ import 'pages/profile_page.dart';
 
 import '../auth/local_auth_controller.dart';
 import '../social/social_graph_controller.dart';
+import '../chat/chat_controller.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -16,12 +17,14 @@ class AppShell extends StatefulWidget {
     required this.onSignOut,
     required this.auth,
     required this.social,
+    required this.chat,
   });
 
   final String signedInEmail;
   final VoidCallback onSignOut;
   final LocalAuthController auth;
   final SocialGraphController social;
+  final ChatController chat;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -118,7 +121,12 @@ class _AppShellState extends State<AppShell> {
           social: widget.social,
         );
       case 2:
-        return const MessagesPage();
+        return MessagesPage(
+          signedInEmail: widget.signedInEmail,
+          auth: widget.auth,
+          social: widget.social,
+          chat: widget.chat,
+        );
       case 3:
         return const CampusPage();
       case 4:

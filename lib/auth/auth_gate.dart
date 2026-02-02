@@ -6,11 +6,14 @@ import '../ui/auth/login_page.dart';
 
 import '../social/social_graph_controller.dart';
 
+import '../chat/chat_controller.dart';
+
 class AuthGate extends StatelessWidget {
-  const AuthGate({super.key, required this.controller, required this.social});
+  const AuthGate({super.key, required this.controller, required this.social, required this.chat});
 
   final LocalAuthController controller;
   final SocialGraphController social;
+  final ChatController chat;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +30,7 @@ class AuthGate extends StatelessWidget {
           onSignOut: controller.signOut,
           auth: controller,
           social: social,
+          chat: chat,
         );
       },
     );
