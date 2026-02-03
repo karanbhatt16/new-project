@@ -131,6 +131,24 @@ class FirebaseAuthController extends ChangeNotifier {
     return data?['publicKeyX25519B64'] as String?;
   }
 
+  Future<AppUser?> publicProfileByUid(String uid) async {
+    final doc = await _db.collection('users').doc(uid).get();
+    final data = doc.data();
+    if (data == null) return null;
+
+    return AppUser(
+      uid: (data['uid'] as String?) ?? uid,
+      email: (data['email'] as String?) ?? '',
+      username: (data['username'] as String?) ?? '',
+      gender: _genderFromString(data['gender'] as String?),
+      bio: (data['bio'] as String?) ?? '',
+      interests: (data['interests'] as List<dynamic>?)?.cast<String>() ?? const <String>[],
+      profileImageBytes: (data['profileImageB64'] as String?) == null
+          ? null
+          : base64Decode(data['profileImageB64'] as String),
+    );
+  }
+
   static Gender _genderFromString(String? s) {
     switch (s) {
       case 'male':

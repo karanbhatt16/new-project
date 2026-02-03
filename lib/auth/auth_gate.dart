@@ -4,7 +4,7 @@ import '../ui/app_shell.dart';
 import 'firebase_auth_controller.dart';
 import '../ui/auth/login_page.dart';
 
-import '../social/social_graph_controller.dart';
+import '../social/firestore_social_graph_controller.dart';
 
 import '../chat/firestore_chat_controller.dart';
 
@@ -12,7 +12,7 @@ class AuthGate extends StatelessWidget {
   const AuthGate({super.key, required this.controller, required this.social, required this.chat});
 
   final FirebaseAuthController controller;
-  final SocialGraphController social;
+  final FirestoreSocialGraphController social;
   final FirestoreChatController chat;
 
   @override

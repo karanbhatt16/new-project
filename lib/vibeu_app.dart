@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'auth/auth_gate.dart';
 import 'auth/firebase_auth_controller.dart';
-import 'social/social_graph_controller.dart';
+import 'social/firestore_social_graph_controller.dart';
 import 'chat/firestore_chat_controller.dart';
 
 class VibeUApp extends StatefulWidget {
@@ -14,7 +14,7 @@ class VibeUApp extends StatefulWidget {
 
 class _VibeUAppState extends State<VibeUApp> {
   final _auth = FirebaseAuthController();
-  final _social = SocialGraphController();
+  final _social = FirestoreSocialGraphController();
   late final _chat = FirestoreChatController(auth: _auth);
 
   @override

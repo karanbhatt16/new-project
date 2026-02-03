@@ -7,7 +7,7 @@ import 'pages/messages_page.dart';
 import 'pages/profile_page.dart';
 
 import '../auth/firebase_auth_controller.dart';
-import '../social/social_graph_controller.dart';
+import '../social/firestore_social_graph_controller.dart';
 import '../chat/firestore_chat_controller.dart';
 
 class AppShell extends StatefulWidget {
@@ -25,7 +25,7 @@ class AppShell extends StatefulWidget {
   final String signedInEmail;
   final VoidCallback onSignOut;
   final FirebaseAuthController auth;
-  final SocialGraphController social;
+  final FirestoreSocialGraphController social;
   final FirestoreChatController chat;
 
   @override
@@ -118,6 +118,7 @@ class _AppShellState extends State<AppShell> {
         return const FeedPage();
       case 1:
         return DiscoverPage(
+          signedInUid: widget.signedInUid,
           signedInEmail: widget.signedInEmail,
           auth: widget.auth,
           social: widget.social,
@@ -134,8 +135,11 @@ class _AppShellState extends State<AppShell> {
         return const CampusPage();
       case 4:
         return ProfilePage(
+          signedInUid: widget.signedInUid,
           signedInEmail: widget.signedInEmail,
           onSignOut: widget.onSignOut,
+          auth: widget.auth,
+          social: widget.social,
         );
       default:
         return const FeedPage();

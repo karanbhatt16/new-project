@@ -5,72 +5,72 @@ import 'package:flutter/material.dart';
 
 import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
-import '../../social/social_graph_controller.dart';
+import '../../social/firestore_social_graph_controller.dart';
 import 'friend_action_button.dart';
 import 'user_profile_page.dart';
 
 class DiscoverPage extends StatelessWidget {
   const DiscoverPage({
     super.key,
+    required this.signedInUid,
     required this.signedInEmail,
     required this.auth,
     required this.social,
   });
 
+  final String signedInUid;
   final String signedInEmail;
   final FirebaseAuthController auth;
-  final SocialGraphController social;
+  final FirestoreSocialGraphController social;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      // Rebuild Discover when friend state changes.
-      animation: social,
-      builder: (context, _) {
-        return DefaultTabController(
-          length: 2,
-          child: Column(
-            children: [
-              const TabBar(
-                tabs: [
-                  Tab(text: 'Swipe'),
-                  Tab(text: 'Browse'),
-                ],
-              ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _SwipeDiscover(
-                      signedInEmail: signedInEmail,
-                      auth: auth,
-                      social: social,
-                    ),
-                    _BrowseDiscover(
-                      signedInEmail: signedInEmail,
-                      auth: auth,
-                      social: social,
-                    ),
-                  ],
-                ),
-              ),
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          const TabBar(
+            tabs: [
+              Tab(text: 'Swipe'),
+              Tab(text: 'Browse'),
             ],
           ),
-        );
-      },
+          Expanded(
+            child: TabBarView(
+              children: [
+                _SwipeDiscover(
+                  signedInUid: signedInUid,
+                  signedInEmail: signedInEmail,
+                  auth: auth,
+                  social: social,
+                ),
+                _BrowseDiscover(
+                  signedInUid: signedInUid,
+                  signedInEmail: signedInEmail,
+                  auth: auth,
+                  social: social,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _SwipeDiscover extends StatefulWidget {
   const _SwipeDiscover({
+    required this.signedInUid,
     required this.signedInEmail,
     required this.auth,
     required this.social,
   });
 
+  final String signedInUid;
   final String signedInEmail;
   final FirebaseAuthController auth;
-  final SocialGraphController social;
+  final FirestoreSocialGraphController social;
 
   @override
   State<_SwipeDiscover> createState() => _SwipeDiscoverState();
@@ -79,9 +79,9 @@ class _SwipeDiscover extends StatefulWidget {
 class _SwipeDiscoverState extends State<_SwipeDiscover> {
   int _index = 0;
 
-  void _next() {
+  void _next(int count) {
     setState(() {
-      _index = _index + 1;
+      _index = (_index + 1) % max(count, 1);
     });
   }
 
@@ -97,138 +97,139 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final candidates = all.where((u) => u.email != widget.signedInEmail).toList(growable: false);
+        final candidates = all.where((u) => u.uid != widget.signedInUid).toList(growable: false);
         candidates.sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
 
         if (candidates.isEmpty) {
-          return const Center(
-            child: Text('No students yet. Ask friends to sign up so you can discover them.'),
-          );
+          return const Center(child: Text('No students yet. Ask friends to sign up so you can discover them.'));
         }
 
         final u = candidates[_index % max(candidates.length, 1)];
-        final otherId = u.email;
 
-        final areFriends = widget.social.areFriends(widget.signedInEmail, otherId);
-        final hasOutgoing = widget.social.hasOutgoingRequest(widget.signedInEmail, otherId);
-        final hasIncoming = widget.social.hasIncomingRequest(widget.signedInEmail, otherId);
+        return StreamBuilder<FriendStatus>(
+          stream: widget.social.friendStatusStream(myUid: widget.signedInUid, otherUid: u.uid),
+          builder: (context, statusSnap) {
+            final status = statusSnap.data;
+            if (status == null) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 520),
-                child: Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    side: BorderSide(color: theme.colorScheme.outlineVariant),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        InkWell(
-                          borderRadius: BorderRadius.circular(18),
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => UserProfilePage(
-                                  currentUserId: widget.signedInEmail,
-                                  user: u,
-                                  social: widget.social,
-                                ),
-                              ),
-                            );
-                          },
-                          child: Container(
-                            height: 360,
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            child: Center(
-                              child: CircleAvatar(
-                                radius: 44,
-                                backgroundImage: u.profileImageBytes == null
-                                    ? null
-                                    : MemoryImage(Uint8List.fromList(u.profileImageBytes!)),
-                                child: u.profileImageBytes == null
-                                    ? const Icon(Icons.person, size: 54)
-                                    : null,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          u.username,
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          u.gender.label,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(u.bio.isEmpty ? 'No bio yet.' : u.bio),
-                        const SizedBox(height: 16),
-                        Row(
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        side: BorderSide(color: theme.colorScheme.outlineVariant),
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Expanded(
-                              child: FilledButton.tonalIcon(
-                                onPressed: _next,
-                                icon: const Icon(Icons.close),
-                                label: const Text('Pass'),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(18),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => UserProfilePage(
+                                      currentUserUid: widget.signedInUid,
+                                      user: u,
+                                      social: widget.social,
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                height: 360,
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Center(
+                                  child: CircleAvatar(
+                                    radius: 44,
+                                    backgroundImage: u.profileImageBytes == null
+                                        ? null
+                                        : MemoryImage(Uint8List.fromList(u.profileImageBytes!)),
+                                    child: u.profileImageBytes == null
+                                        ? const Icon(Icons.person, size: 54)
+                                        : null,
+                                  ),
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: FriendActionButton(
-                                areFriends: areFriends,
-                                hasOutgoing: hasOutgoing,
-                                hasIncoming: hasIncoming,
-                                onAdd: () => widget.social.sendRequest(
-                                  from: widget.signedInEmail,
-                                  to: otherId,
-                                ),
-                                onAccept: () => widget.social.acceptRequest(
-                                  to: widget.signedInEmail,
-                                  from: otherId,
-                                ),
+                            const SizedBox(height: 12),
+                            Text(
+                              u.username,
+                              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              u.gender.label,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
                               ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(u.bio.isEmpty ? 'No bio yet.' : u.bio),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: FilledButton.tonalIcon(
+                                    onPressed: () => _next(candidates.length),
+                                    icon: const Icon(Icons.close),
+                                    label: const Text('Pass'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: FriendActionButton(
+                                    areFriends: status.areFriends,
+                                    hasOutgoing: status.hasOutgoingRequest,
+                                    hasIncoming: status.hasIncomingRequest,
+                                    onAdd: () => widget.social.sendRequest(
+                                      fromUid: widget.signedInUid,
+                                      toUid: u.uid,
+                                    ),
+                                    onAccept: () => widget.social.acceptIncoming(
+                                      toUid: widget.signedInUid,
+                                      fromUid: u.uid,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => UserProfilePage(
+                                      currentUserUid: widget.signedInUid,
+                                      user: u,
+                                      social: widget.social,
+                                    ),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.info_outline),
+                              label: const Text('View profile'),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => UserProfilePage(
-                                  currentUserId: widget.signedInEmail,
-                                  user: u,
-                                  social: widget.social,
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.info_outline),
-                          label: const Text('View profile'),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
-          ],
+              ],
+            );
+          },
         );
       },
     );
@@ -237,14 +238,16 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
 
 class _BrowseDiscover extends StatelessWidget {
   const _BrowseDiscover({
+    required this.signedInUid,
     required this.signedInEmail,
     required this.auth,
     required this.social,
   });
 
+  final String signedInUid;
   final String signedInEmail;
   final FirebaseAuthController auth;
-  final SocialGraphController social;
+  final FirestoreSocialGraphController social;
 
   @override
   Widget build(BuildContext context) {
@@ -256,13 +259,11 @@ class _BrowseDiscover extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final users = all.where((u) => u.email != signedInEmail).toList(growable: false);
+        final users = all.where((u) => u.uid != signedInUid).toList(growable: false);
         users.sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
 
         if (users.isEmpty) {
-          return const Center(
-            child: Text('No students yet. Create a second account to see Discover suggestions.'),
-          );
+          return const Center(child: Text('No students yet. Create a second account to see Discover suggestions.'));
         }
 
         return LayoutBuilder(
@@ -285,7 +286,7 @@ class _BrowseDiscover extends StatelessWidget {
               itemCount: users.length,
               itemBuilder: (context, index) {
                 return _BrowseTile(
-                  currentUserId: signedInEmail,
+                  currentUid: signedInUid,
                   user: users[index],
                   social: social,
                 );
@@ -300,94 +301,97 @@ class _BrowseDiscover extends StatelessWidget {
 
 class _BrowseTile extends StatelessWidget {
   const _BrowseTile({
-    required this.currentUserId,
+    required this.currentUid,
     required this.user,
     required this.social,
   });
 
-  final String currentUserId;
+  final String currentUid;
   final AppUser user;
-  final SocialGraphController social;
+  final FirestoreSocialGraphController social;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final otherId = user.email;
-    final areFriends = social.areFriends(currentUserId, otherId);
-    final hasOutgoing = social.hasOutgoingRequest(currentUserId, otherId);
-    final hasIncoming = social.hasIncomingRequest(currentUserId, otherId);
+    return StreamBuilder<FriendStatus>(
+      stream: social.friendStatusStream(myUid: currentUid, otherUid: user.uid),
+      builder: (context, snap) {
+        final s = snap.data;
+        if (s == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        side: BorderSide(color: theme.colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => UserProfilePage(
-                currentUserId: currentUserId,
-                user: user,
-                social: social,
-              ),
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(14),
+        return Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: theme.colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => UserProfilePage(
+                    currentUserUid: currentUid,
+                    user: user,
+                    social: social,
                   ),
-                  child: Center(
-                    child: CircleAvatar(
-                      radius: 28,
-                      backgroundImage: user.profileImageBytes == null
-                          ? null
-                          : MemoryImage(Uint8List.fromList(user.profileImageBytes!)),
-                      child: user.profileImageBytes == null ? const Icon(Icons.person) : null,
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Center(
+                        child: CircleAvatar(
+                          radius: 28,
+                          backgroundImage: user.profileImageBytes == null
+                              ? null
+                              : MemoryImage(Uint8List.fromList(user.profileImageBytes!)),
+                          child: user.profileImageBytes == null ? const Icon(Icons.person) : null,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  Text(
+                    user.username,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    user.gender.label,
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FriendActionButton(
+                      areFriends: s.areFriends,
+                      hasOutgoing: s.hasOutgoingRequest,
+                      hasIncoming: s.hasIncomingRequest,
+                      onAdd: () => social.sendRequest(fromUid: currentUid, toUid: user.uid),
+                      onAccept: () => social.acceptIncoming(toUid: currentUid, fromUid: user.uid),
+                      dense: true,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              Text(
-                user.username,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              Text(
-                user.gender.label,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: FriendActionButton(
-                  areFriends: areFriends,
-                  hasOutgoing: hasOutgoing,
-                  hasIncoming: hasIncoming,
-                  onAdd: () => social.sendRequest(from: currentUserId, to: otherId),
-                  onAccept: () => social.acceptRequest(to: currentUserId, from: otherId),
-                  dense: true,
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
 
+import '../../auth/firebase_auth_controller.dart';
+import '../../social/firestore_social_graph_controller.dart';
+import 'friend_requests_page.dart';
+
 class ProfilePage extends StatelessWidget {
   const ProfilePage({
     super.key,
+    required this.signedInUid,
     required this.signedInEmail,
     required this.onSignOut,
+    required this.auth,
+    required this.social,
   });
 
+  final String signedInUid;
   final String signedInEmail;
   final VoidCallback onSignOut;
+  final FirebaseAuthController auth;
+  final FirestoreSocialGraphController social;
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +59,33 @@ class ProfilePage extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
+        _SectionCard(
+          title: 'Social',
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.person_add_alt_1),
+                title: const Text('Friend requests'),
+                subtitle: const Text('Accept/decline requests and view pending'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  final me = await auth.publicProfileByUid(signedInUid);
+                  if (me == null || !context.mounted) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => FriendRequestsPage(
+                        currentUser: me,
+                        auth: auth,
+                        social: social,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
         _SectionCard(
           title: 'About',
           child: Column(
