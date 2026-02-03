@@ -62,47 +62,38 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                   ],
                 ),
               Expanded(
-                child: StreamBuilder<List<FirestoreEncryptedMessage>>(
-                  stream: widget.chat.encryptedMessagesStream(threadId: widget.thread.id),
+                child: StreamBuilder<List<FirestoreMessage>>(
+                  stream: widget.chat.messagesStream(threadId: widget.thread.id),
                   builder: (context, snap) {
-                    final encrypted = snap.data;
-                    if (encrypted == null) {
+                    final messages = snap.data;
+                    if (messages == null) {
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    return FutureBuilder<List<_UiMessage>>(
-                      future: _decryptAll(encrypted),
-                      builder: (context, decSnap) {
-                        final messages = decSnap.data;
-                        if (messages == null) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
+                    return ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      reverse: true,
+                      itemCount: messages.length,
+                      itemBuilder: (context, index) {
+                        final m = messages[messages.length - 1 - index];
+                        final isMe = m.fromUid == widget.currentUser.uid;
+                        final text = widget.chat.displayText(m);
 
-                        return ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          reverse: true,
-                          itemCount: messages.length,
-                          itemBuilder: (context, index) {
-                            final m = messages[messages.length - 1 - index];
-                            final isMe = m.fromUid == widget.currentUser.uid;
-
-                            return Align(
-                              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 520),
-                                child: Card(
-                                  elevation: 0,
-                                  color: isMe
-                                      ? Theme.of(context).colorScheme.primaryContainer
-                                      : Theme.of(context).colorScheme.surfaceContainerHighest,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                    child: Text(m.text),
-                                  ),
-                                ),
+                        return Align(
+                          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 520),
+                            child: Card(
+                              elevation: 0,
+                              color: isMe
+                                  ? Theme.of(context).colorScheme.primaryContainer
+                                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                child: Text(text),
                               ),
-                            );
-                          },
+                            ),
+                          ),
                         );
                       },
                     );
@@ -146,48 +137,20 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
     );
   }
 
-  Future<List<_UiMessage>> _decryptAll(List<FirestoreEncryptedMessage> encrypted) async {
-    final out = <_UiMessage>[];
-
-    for (final m in encrypted) {
-      try {
-        final text = await widget.chat.decryptMessage(
-          threadId: widget.thread.id,
-          message: m,
-          myUid: widget.currentUser.uid,
-          otherUid: widget.otherUser.uid,
-        );
-        out.add(_UiMessage(fromUid: m.fromUid, text: text));
-      } catch (_) {
-        out.add(_UiMessage(fromUid: m.fromUid, text: '[Unable to decrypt]'));
-      }
-    }
-
-    return out;
-  }
-
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    // Only clear after a successful send.
     await runAsyncAction(context, () async {
-      await widget.chat.sendEncryptedMessage(
+      await widget.chat.sendMessagePlaintext(
         threadId: widget.thread.id,
         fromUid: widget.currentUser.uid,
         fromEmail: widget.currentUser.email,
         toUid: widget.otherUser.uid,
         toEmail: widget.otherUser.email,
-        plaintext: text,
+        text: text,
       );
       _controller.clear();
     });
   }
-}
-
-class _UiMessage {
-  const _UiMessage({required this.fromUid, required this.text});
-
-  final String fromUid;
-  final String text;
 }

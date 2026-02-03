@@ -23,41 +23,49 @@ class FirestoreChatThread {
   String otherEmail(String myUid) => userAUid == myUid ? userBEmail : userAEmail;
 }
 
+/// A chat message stored in Firestore.
+///
+/// New messages use plaintext field `text`.
+/// Older messages may contain encrypted payload fields.
 @immutable
-class FirestoreEncryptedMessage {
-  const FirestoreEncryptedMessage({
+class FirestoreMessage {
+  const FirestoreMessage({
     required this.id,
     required this.threadId,
     required this.fromUid,
     required this.toUid,
-    required this.ciphertextB64,
-    required this.nonceB64,
-    required this.macB64,
     required this.sentAt,
+    this.text,
+    this.ciphertextB64,
+    this.nonceB64,
+    this.macB64,
   });
 
   final String id;
   final String threadId;
   final String fromUid;
   final String toUid;
-  final String ciphertextB64;
-  final String nonceB64;
-  final String macB64;
   final DateTime sentAt;
 
-  static FirestoreEncryptedMessage fromDoc({
+  final String? text;
+  final String? ciphertextB64;
+  final String? nonceB64;
+  final String? macB64;
+
+  static FirestoreMessage fromDoc({
     required String threadId,
     required QueryDocumentSnapshot<Map<String, dynamic>> doc,
   }) {
     final d = doc.data();
-    return FirestoreEncryptedMessage(
+    return FirestoreMessage(
       id: doc.id,
       threadId: threadId,
       fromUid: d['fromUid'] as String,
       toUid: d['toUid'] as String,
-      ciphertextB64: d['ciphertextB64'] as String,
-      nonceB64: d['nonceB64'] as String,
-      macB64: d['macB64'] as String,
+      text: d['text'] as String?,
+      ciphertextB64: d['ciphertextB64'] as String?,
+      nonceB64: d['nonceB64'] as String?,
+      macB64: d['macB64'] as String?,
       sentAt: (d['sentAt'] as Timestamp?)?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0),
     );
   }

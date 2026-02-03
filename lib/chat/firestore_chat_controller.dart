@@ -4,32 +4,31 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../auth/firebase_auth_controller.dart';
-import '../crypto/e2ee.dart';
 import '../notifications/firestore_notifications_controller.dart';
 import '../notifications/notification_models.dart';
 import 'firestore_chat_models.dart';
 
-/// Firestore-backed chat with client-side encryption.
+/// Firestore-backed chat (plaintext messages).
 ///
-/// Firestore schema:
+/// Schema:
 /// threads/{threadId}:
 ///   userAUid, userBUid, userAEmail, userBEmail, updatedAt
 /// threads/{threadId}/messages/{messageId}:
-///   fromUid, toUid, ciphertextB64, nonceB64, macB64, sentAt
+///   fromUid, toUid, text, sentAt
+///
+/// Notes:
+/// - Older encrypted messages are tolerated and shown as "[Encrypted message]".
 class FirestoreChatController extends ChangeNotifier {
   FirestoreChatController({
     required this.auth,
     FirebaseFirestore? firestore,
-    E2ee? e2ee,
     FirestoreNotificationsController? notifications,
   })  : _db = firestore ?? FirebaseFirestore.instance,
-        _e2ee = e2ee ?? E2ee(),
         _notifications = notifications ??
             FirestoreNotificationsController(firestore: firestore ?? FirebaseFirestore.instance);
 
   final FirebaseAuthController auth;
   final FirebaseFirestore _db;
-  final E2ee _e2ee;
   final FirestoreNotificationsController _notifications;
 
   String _threadIdForUids(String a, String b) {
@@ -69,8 +68,6 @@ class FirestoreChatController extends ChangeNotifier {
   }
 
   Stream<List<FirestoreChatThread>> threadsStream({required String myUid}) {
-    // Query for userAUid==myUid OR userBUid==myUid isn't directly possible without
-    // composite indexing tricks; keep it simple by merging two streams.
     final a = _db.collection('threads').where('userAUid', isEqualTo: myUid).snapshots();
     final b = _db.collection('threads').where('userBUid', isEqualTo: myUid).snapshots();
 
@@ -83,7 +80,6 @@ class FirestoreChatController extends ChangeNotifier {
       if (lastA == null || lastB == null) return;
       final docs = <QueryDocumentSnapshot<Map<String, dynamic>>>[...lastA!.docs, ...lastB!.docs];
 
-      // Deduplicate by id.
       final byId = <String, FirestoreChatThread>{};
       for (final d in docs) {
         final data = d.data();
@@ -126,49 +122,34 @@ class FirestoreChatController extends ChangeNotifier {
     return controller.stream;
   }
 
-  Stream<List<FirestoreEncryptedMessage>> encryptedMessagesStream({required String threadId}) {
+  Stream<List<FirestoreMessage>> messagesStream({required String threadId}) {
     return _db
         .collection('threads')
         .doc(threadId)
         .collection('messages')
         .orderBy('sentAt', descending: false)
         .snapshots()
-        .map((snap) => snap.docs.map((d) => FirestoreEncryptedMessage.fromDoc(threadId: threadId, doc: d)).toList());
+        .map((snap) => snap.docs.map((d) => FirestoreMessage.fromDoc(threadId: threadId, doc: d)).toList());
   }
 
-  Future<String> sendEncryptedMessage({
+  Future<String> sendMessagePlaintext({
     required String threadId,
     required String fromUid,
     required String fromEmail,
     required String toUid,
     required String toEmail,
-    required String plaintext,
+    required String text,
   }) async {
-    final meKeyPair = await _e2ee.getOrCreateIdentityKeyPair(uid: fromUid);
-
-    final theirPubB64 = await auth.publicKeyForUid(toUid);
-    if (theirPubB64 == null) {
-      throw StateError('Recipient has no public key published yet.');
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      throw ArgumentError('text is empty');
     }
-
-    final theirPub = _e2ee.parsePublicKeyB64(theirPubB64);
-    final threadKey = await _e2ee.deriveThreadKey(
-      myIdentityKeyPair: meKeyPair,
-      theirPublicKey: theirPub,
-      threadId: threadId,
-    );
-
-    // Bind encryption to thread + participants.
-    final aad = 'vibeu:$threadId:$fromUid:$toUid'.codeUnits;
-    final enc = await _e2ee.encrypt(key: threadKey, plaintext: plaintext, aad: aad);
 
     final msgDoc = _db.collection('threads').doc(threadId).collection('messages').doc();
     await msgDoc.set({
       'fromUid': fromUid,
       'toUid': toUid,
-      'ciphertextB64': enc['ciphertextB64'],
-      'nonceB64': enc['nonceB64'],
-      'macB64': enc['macB64'],
+      'text': trimmed,
       'sentAt': FieldValue.serverTimestamp(),
     });
 
@@ -176,44 +157,22 @@ class FirestoreChatController extends ChangeNotifier {
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
-    await _notifications.create(
-      toUid: toUid,
-      fromUid: fromUid,
-      type: NotificationType.message,
-      threadId: threadId,
-    );
+    // Best-effort notification (if rules block this, message should still exist).
+    try {
+      await _notifications.create(
+        toUid: toUid,
+        fromUid: fromUid,
+        type: NotificationType.message,
+        threadId: threadId,
+      );
+    } catch (_) {}
 
     return msgDoc.id;
   }
 
-  Future<String> decryptMessage({
-    required String threadId,
-    required FirestoreEncryptedMessage message,
-    required String myUid,
-    required String otherUid,
-  }) async {
-    final myKeyPair = await _e2ee.getOrCreateIdentityKeyPair(uid: myUid);
-
-    final otherPubB64 = await auth.publicKeyForUid(otherUid);
-    if (otherPubB64 == null) {
-      throw StateError('Other user has no public key.');
-    }
-
-    final otherPub = _e2ee.parsePublicKeyB64(otherPubB64);
-    final threadKey = await _e2ee.deriveThreadKey(
-      myIdentityKeyPair: myKeyPair,
-      theirPublicKey: otherPub,
-      threadId: threadId,
-    );
-
-    final aad = 'vibeu:$threadId:${message.fromUid}:${message.toUid}'.codeUnits;
-
-    return _e2ee.decrypt(
-      key: threadKey,
-      ciphertextB64: message.ciphertextB64,
-      nonceB64: message.nonceB64,
-      macB64: message.macB64,
-      aad: aad,
-    );
+  String displayText(FirestoreMessage message) {
+    if (message.text != null) return message.text!;
+    if (message.ciphertextB64 != null) return '[Encrypted message]';
+    return '[Unsupported message]';
   }
 }
