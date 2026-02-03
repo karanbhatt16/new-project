@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
+import '../notifications/firestore_notifications_controller.dart';
+import '../notifications/notification_models.dart';
+
 /// Firestore-backed friend requests + friends list.
 ///
 /// Schema:
@@ -49,10 +52,14 @@ class FriendStatus {
 }
 
 class FirestoreSocialGraphController {
-  FirestoreSocialGraphController({FirebaseFirestore? firestore})
-      : _db = firestore ?? FirebaseFirestore.instance;
+  FirestoreSocialGraphController({
+    FirebaseFirestore? firestore,
+    FirestoreNotificationsController? notifications,
+  })  : _db = firestore ?? FirebaseFirestore.instance,
+        _notifications = notifications ?? FirestoreNotificationsController(firestore: firestore ?? FirebaseFirestore.instance);
 
   final FirebaseFirestore _db;
+  final FirestoreNotificationsController _notifications;
 
   /// Deterministic request id for a pair (from -> to). Prevents duplicates.
   String requestId(String fromUid, String toUid) => '$fromUid->$toUid';
@@ -119,16 +126,34 @@ class FirestoreSocialGraphController {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     });
+
+    await _notifications.create(
+      toUid: toUid,
+      fromUid: fromUid,
+      type: NotificationType.friendRequestSent,
+    );
   }
 
   Future<void> cancelOutgoing({required String fromUid, required String toUid}) async {
     final ref = _db.collection('friend_requests').doc(requestId(fromUid, toUid));
     await ref.set({'status': 'cancelled', 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+
+    await _notifications.create(
+      toUid: toUid,
+      fromUid: fromUid,
+      type: NotificationType.friendRequestCancelled,
+    );
   }
 
   Future<void> declineIncoming({required String toUid, required String fromUid}) async {
     final ref = _db.collection('friend_requests').doc(requestId(fromUid, toUid));
     await ref.set({'status': 'declined', 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+
+    await _notifications.create(
+      toUid: fromUid,
+      fromUid: toUid,
+      type: NotificationType.friendRequestDeclined,
+    );
   }
 
   Future<void> acceptIncoming({required String toUid, required String fromUid}) async {
@@ -146,6 +171,12 @@ class FirestoreSocialGraphController {
       tx.set(aRef, {'friendUid': fromUid, 'createdAt': FieldValue.serverTimestamp()});
       tx.set(bRef, {'friendUid': toUid, 'createdAt': FieldValue.serverTimestamp()});
     });
+
+    await _notifications.create(
+      toUid: fromUid,
+      fromUid: toUid,
+      type: NotificationType.friendRequestAccepted,
+    );
   }
 
   Stream<FriendStatus> friendStatusStream({required String myUid, required String otherUid}) {

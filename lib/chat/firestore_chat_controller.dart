@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 
 import '../auth/firebase_auth_controller.dart';
 import '../crypto/e2ee.dart';
+import '../notifications/firestore_notifications_controller.dart';
+import '../notifications/notification_models.dart';
 import 'firestore_chat_models.dart';
 
 /// Firestore-backed chat with client-side encryption.
@@ -19,12 +21,16 @@ class FirestoreChatController extends ChangeNotifier {
     required this.auth,
     FirebaseFirestore? firestore,
     E2ee? e2ee,
+    FirestoreNotificationsController? notifications,
   })  : _db = firestore ?? FirebaseFirestore.instance,
-        _e2ee = e2ee ?? E2ee();
+        _e2ee = e2ee ?? E2ee(),
+        _notifications = notifications ??
+            FirestoreNotificationsController(firestore: firestore ?? FirebaseFirestore.instance);
 
   final FirebaseAuthController auth;
   final FirebaseFirestore _db;
   final E2ee _e2ee;
+  final FirestoreNotificationsController _notifications;
 
   String _threadIdForUids(String a, String b) {
     final aa = a.compareTo(b) <= 0 ? a : b;
@@ -169,6 +175,13 @@ class FirestoreChatController extends ChangeNotifier {
     await _db.collection('threads').doc(threadId).set({
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+
+    await _notifications.create(
+      toUid: toUid,
+      fromUid: fromUid,
+      type: NotificationType.message,
+      threadId: threadId,
+    );
 
     return msgDoc.id;
   }

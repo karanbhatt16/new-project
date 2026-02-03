@@ -5,10 +5,12 @@ import 'pages/discover_page.dart';
 import 'pages/feed_page.dart';
 import 'pages/messages_page.dart';
 import 'pages/profile_page.dart';
+import 'pages/notifications_page.dart';
 
 import '../auth/firebase_auth_controller.dart';
 import '../social/firestore_social_graph_controller.dart';
 import '../chat/firestore_chat_controller.dart';
+import '../notifications/firestore_notifications_controller.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -19,6 +21,7 @@ class AppShell extends StatefulWidget {
     required this.auth,
     required this.social,
     required this.chat,
+    required this.notifications,
   });
 
   final String signedInUid;
@@ -27,6 +30,7 @@ class AppShell extends StatefulWidget {
   final FirebaseAuthController auth;
   final FirestoreSocialGraphController social;
   final FirestoreChatController chat;
+  final FirestoreNotificationsController notifications;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -39,6 +43,7 @@ class _AppShellState extends State<AppShell> {
     _DestinationSpec('Feed', Icons.home_outlined, Icons.home),
     _DestinationSpec('Discover', Icons.explore_outlined, Icons.explore),
     _DestinationSpec('Messages', Icons.chat_bubble_outline, Icons.chat_bubble),
+    _DestinationSpec('Notifications', Icons.favorite_border, Icons.favorite),
     _DestinationSpec('Campus', Icons.groups_outlined, Icons.groups),
     _DestinationSpec('Profile', Icons.person_outline, Icons.person),
   ];
@@ -132,8 +137,14 @@ class _AppShellState extends State<AppShell> {
           chat: widget.chat,
         );
       case 3:
-        return const CampusPage();
+        return NotificationsPage(
+          signedInUid: widget.signedInUid,
+          auth: widget.auth,
+          notifications: widget.notifications,
+        );
       case 4:
+        return const CampusPage();
+      case 5:
         return ProfilePage(
           signedInUid: widget.signedInUid,
           signedInEmail: widget.signedInEmail,
