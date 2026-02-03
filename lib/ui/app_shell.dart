@@ -11,6 +11,7 @@ import '../auth/firebase_auth_controller.dart';
 import '../social/firestore_social_graph_controller.dart';
 import '../chat/firestore_chat_controller.dart';
 import '../notifications/firestore_notifications_controller.dart';
+import '../posts/firestore_posts_controller.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -22,6 +23,7 @@ class AppShell extends StatefulWidget {
     required this.social,
     required this.chat,
     required this.notifications,
+    required this.posts,
   });
 
   final String signedInUid;
@@ -31,6 +33,7 @@ class AppShell extends StatefulWidget {
   final FirestoreSocialGraphController social;
   final FirestoreChatController chat;
   final FirestoreNotificationsController notifications;
+  final FirestorePostsController posts;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -131,7 +134,10 @@ class _AppShellState extends State<AppShell> {
   Widget _pageForIndex(int index) {
     switch (index) {
       case 0:
-        return const FeedPage();
+        return FeedPage(
+          currentUid: widget.signedInUid,
+          posts: widget.posts,
+        );
       case 1:
         return DiscoverPage(
           signedInUid: widget.signedInUid,
@@ -158,7 +164,10 @@ class _AppShellState extends State<AppShell> {
           social: widget.social,
         );
       default:
-        return const FeedPage();
+        return FeedPage(
+          currentUid: widget.signedInUid,
+          posts: widget.posts,
+        );
     }
   }
 }

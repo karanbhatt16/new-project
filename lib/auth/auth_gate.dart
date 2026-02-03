@@ -8,6 +8,7 @@ import '../social/firestore_social_graph_controller.dart';
 
 import '../chat/firestore_chat_controller.dart';
 import '../notifications/firestore_notifications_controller.dart';
+import '../posts/firestore_posts_controller.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({
@@ -16,12 +17,14 @@ class AuthGate extends StatelessWidget {
     required this.social,
     required this.chat,
     required this.notifications,
+    required this.posts,
   });
 
   final FirebaseAuthController controller;
   final FirestoreSocialGraphController social;
   final FirestoreChatController chat;
   final FirestoreNotificationsController notifications;
+  final FirestorePostsController posts;
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +59,7 @@ class AuthGate extends StatelessWidget {
               social: social,
               chat: chat,
               notifications: notifications,
+              posts: posts,
             );
           },
         );
