@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'app_user.dart';
 import 'firestore_user_repository.dart';
 import '../crypto/e2ee.dart';
+import '../crypto/key_backup.dart';
 
 /// Firebase-auth backed controller.
 ///
@@ -119,10 +120,16 @@ class FirebaseAuthController extends ChangeNotifier {
     final keyPair = await e2ee.getOrCreateIdentityKeyPair(uid: u.uid);
     final publicKeyB64 = await e2ee.publicKeyB64(keyPair);
 
-    await _db.collection('users').doc(u.uid).set({
-      'publicKeyX25519B64': publicKeyB64,
-      'publicKeyUpdatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    // Avoid overwriting an existing public key (would break decryption of old messages).
+    final existing = await _db.collection('users').doc(u.uid).get();
+    final existingKey = (existing.data() ?? const <String, dynamic>{})['publicKeyX25519B64'] as String?;
+
+    if (existingKey == null) {
+      await _db.collection('users').doc(u.uid).set({
+        'publicKeyX25519B64': publicKeyB64,
+        'publicKeyUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
   }
 
   Future<String?> publicKeyForUid(String uid) async {
@@ -131,13 +138,9 @@ class FirebaseAuthController extends ChangeNotifier {
     return data?['publicKeyX25519B64'] as String?;
   }
 
-  Future<AppUser?> publicProfileByUid(String uid) async {
-    final doc = await _db.collection('users').doc(uid).get();
-    final data = doc.data();
-    if (data == null) return null;
-
+  AppUser _userFromMap(String fallbackUid, Map<String, dynamic> data) {
     return AppUser(
-      uid: (data['uid'] as String?) ?? uid,
+      uid: (data['uid'] as String?) ?? fallbackUid,
       email: (data['email'] as String?) ?? '',
       username: (data['username'] as String?) ?? '',
       gender: _genderFromString(data['gender'] as String?),
@@ -147,6 +150,96 @@ class FirebaseAuthController extends ChangeNotifier {
           ? null
           : base64Decode(data['profileImageB64'] as String),
     );
+  }
+
+  Future<AppUser?> publicProfileByUid(String uid) async {
+    final doc = await _db.collection('users').doc(uid).get();
+    final data = doc.data();
+    if (data == null) return null;
+    return _userFromMap(uid, data);
+  }
+
+  Stream<AppUser?> profileStreamByUid(String uid) {
+    return _db.collection('users').doc(uid).snapshots().map((doc) {
+      final data = doc.data();
+      if (data == null) return null;
+      return _userFromMap(uid, data);
+    });
+  }
+
+  Future<void> updateProfileImage({required String uid, required List<int> bytes}) async {
+    await _db.collection('users').doc(uid).set({
+      'profileImageB64': base64Encode(bytes),
+      'profileImageUpdatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Encrypted backup of the identity key seed to Firestore.
+  ///
+  /// Stores at: users/{uid}/key_backups/identity
+  Future<void> backupIdentityKey({required String passphrase}) async {
+    final u = firebaseUser;
+    if (u == null) throw StateError('Not signed in');
+
+    // Ensure we have a seed.
+    await e2ee.getOrCreateIdentityKeyPair(uid: u.uid);
+    final seed = await e2ee.readIdentitySeed(uid: u.uid);
+    if (seed == null) throw StateError('Identity seed missing');
+
+    final blob = await KeyBackup.encryptSeed(seed32: seed, passphrase: passphrase);
+
+    await _db.collection('users').doc(u.uid).collection('key_backups').doc('identity').set({
+      ...blob,
+      'uid': u.uid,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Restore identity seed from Firestore backup into secure storage.
+  ///
+  /// After restore, we verify the derived public key matches the published one.
+  Future<void> restoreIdentityKey({required String passphrase}) async {
+    final u = firebaseUser;
+    if (u == null) throw StateError('Not signed in');
+
+    final doc = await _db.collection('users').doc(u.uid).collection('key_backups').doc('identity').get();
+    final data = doc.data();
+    if (data == null) throw StateError('No key backup found');
+
+    final seed = await KeyBackup.decryptSeed(backup: data, passphrase: passphrase);
+    await e2ee.writeIdentitySeed(uid: u.uid, seed32: seed);
+
+    // Verify public key consistency.
+    final kp = await e2ee.getOrCreateIdentityKeyPair(uid: u.uid);
+    final pub = await e2ee.publicKeyB64(kp);
+    final userDoc = await _db.collection('users').doc(u.uid).get();
+    final existingKey = (userDoc.data() ?? const <String, dynamic>{})['publicKeyX25519B64'] as String?;
+
+    if (existingKey != null && existingKey != pub) {
+      throw StateError(
+        'Restored key does not match the key previously published. Old chats may be undecryptable on this device.',
+      );
+    }
+
+    // Publish if missing.
+    await ensurePublicKeyPublished();
+  }
+
+  /// Fetch multiple user profiles by uid. Firestore `whereIn` supports up to 10.
+  Future<List<AppUser>> publicProfilesByUids(List<String> uids) async {
+    if (uids.isEmpty) return const <AppUser>[];
+
+    final out = <AppUser>[];
+    for (var i = 0; i < uids.length; i += 10) {
+      final chunk = uids.sublist(i, i + 10 > uids.length ? uids.length : i + 10);
+      final snap = await _db.collection('users').where('uid', whereIn: chunk).get();
+      for (final d in snap.docs) {
+        final data = d.data();
+        out.add(_userFromMap(d.id, data));
+      }
+    }
+
+    return out;
   }
 
   static Gender _genderFromString(String? s) {

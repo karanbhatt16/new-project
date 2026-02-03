@@ -43,7 +43,6 @@ class _AppShellState extends State<AppShell> {
     _DestinationSpec('Feed', Icons.home_outlined, Icons.home),
     _DestinationSpec('Discover', Icons.explore_outlined, Icons.explore),
     _DestinationSpec('Messages', Icons.chat_bubble_outline, Icons.chat_bubble),
-    _DestinationSpec('Notifications', Icons.favorite_border, Icons.favorite),
     _DestinationSpec('Campus', Icons.groups_outlined, Icons.groups),
     _DestinationSpec('Profile', Icons.person_outline, Icons.person),
   ];
@@ -63,7 +62,9 @@ class _AppShellState extends State<AppShell> {
               selectedIndex: _index,
               onSelected: (i) => setState(() => _index = i),
               email: widget.signedInEmail,
-              onSignOut: widget.onSignOut,
+              signedInUid: widget.signedInUid,
+              auth: widget.auth,
+              notifications: widget.notifications,
             ),
             const VerticalDivider(width: 1),
             Expanded(
@@ -95,9 +96,19 @@ class _AppShellState extends State<AppShell> {
         title: const Text('vibeU'),
         actions: [
           IconButton(
-            tooltip: 'Sign out',
-            onPressed: widget.onSignOut,
-            icon: const Icon(Icons.logout),
+            tooltip: 'Notifications',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => NotificationsPage(
+                    signedInUid: widget.signedInUid,
+                    auth: widget.auth,
+                    notifications: widget.notifications,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.favorite_border),
           ),
         ],
       ),
@@ -137,14 +148,8 @@ class _AppShellState extends State<AppShell> {
           chat: widget.chat,
         );
       case 3:
-        return NotificationsPage(
-          signedInUid: widget.signedInUid,
-          auth: widget.auth,
-          notifications: widget.notifications,
-        );
-      case 4:
         return const CampusPage();
-      case 5:
+      case 4:
         return ProfilePage(
           signedInUid: widget.signedInUid,
           signedInEmail: widget.signedInEmail,
@@ -171,13 +176,17 @@ class _LeftRail extends StatelessWidget {
     required this.selectedIndex,
     required this.onSelected,
     required this.email,
-    required this.onSignOut,
+    required this.signedInUid,
+    required this.auth,
+    required this.notifications,
   });
 
   final int selectedIndex;
   final ValueChanged<int> onSelected;
   final String email;
-  final VoidCallback onSignOut;
+  final String signedInUid;
+  final FirebaseAuthController auth;
+  final FirestoreNotificationsController notifications;
 
   @override
   Widget build(BuildContext context) {
@@ -246,9 +255,19 @@ class _LeftRail extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.all(16),
               child: OutlinedButton.icon(
-                onPressed: onSignOut,
-                icon: const Icon(Icons.logout),
-                label: const Text('Sign out'),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => NotificationsPage(
+                        signedInUid: signedInUid,
+                        auth: auth,
+                        notifications: notifications,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.favorite_border),
+                label: const Text('Notifications'),
               ),
             ),
           ],

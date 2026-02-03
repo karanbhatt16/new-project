@@ -4,6 +4,7 @@ import '../../auth/app_user.dart';
 import '../../chat/firestore_chat_controller.dart';
 import '../../chat/firestore_chat_models.dart';
 import '../../social/firestore_social_graph_controller.dart';
+import '../widgets/async_action.dart';
 
 class ChatThreadPage extends StatefulWidget {
   const ChatThreadPage({
@@ -169,16 +170,18 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    _controller.clear();
-
-    await widget.chat.sendEncryptedMessage(
-      threadId: widget.thread.id,
-      fromUid: widget.currentUser.uid,
-      fromEmail: widget.currentUser.email,
-      toUid: widget.otherUser.uid,
-      toEmail: widget.otherUser.email,
-      plaintext: text,
-    );
+    // Only clear after a successful send.
+    await runAsyncAction(context, () async {
+      await widget.chat.sendEncryptedMessage(
+        threadId: widget.thread.id,
+        fromUid: widget.currentUser.uid,
+        fromEmail: widget.currentUser.email,
+        toUid: widget.otherUser.uid,
+        toEmail: widget.otherUser.email,
+        plaintext: text,
+      );
+      _controller.clear();
+    });
   }
 }
 

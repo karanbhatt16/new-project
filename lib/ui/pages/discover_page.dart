@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
-import '../widgets/async_error_view.dart';
 import '../widgets/async_action.dart';
+import '../widgets/async_error_view.dart';
 import 'friend_action_button.dart';
 import 'user_profile_page.dart';
 
@@ -89,152 +89,171 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
 
     return FutureBuilder<List<AppUser>>(
       future: widget.auth.getAllUsers(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return AsyncErrorView(error: snapshot.error!);
+      builder: (context, userSnap) {
+        if (userSnap.hasError) {
+          return AsyncErrorView(error: userSnap.error!);
         }
-        if (snapshot.connectionState != ConnectionState.done) {
+        if (userSnap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final all = snapshot.data ?? const <AppUser>[];
-        final candidates = all.where((u) => u.uid != widget.signedInUid).toList(growable: false);
-        candidates.sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
+        final all = userSnap.data ?? const <AppUser>[];
 
-        if (candidates.isEmpty) {
-          return const Center(child: Text('No students yet. Ask friends to sign up so you can discover them.'));
-        }
-
-        final u = candidates[_index % max(candidates.length, 1)];
-
-        return StreamBuilder<FriendStatus>(
-          stream: widget.social.friendStatusStream(myUid: widget.signedInUid, otherUid: u.uid),
-          builder: (context, statusSnap) {
-            if (statusSnap.hasError) {
-              return AsyncErrorView(error: statusSnap.error!);
+        return StreamBuilder<Set<String>>(
+          stream: widget.social.friendsStream(uid: widget.signedInUid),
+          builder: (context, friendsSnap) {
+            if (friendsSnap.hasError) {
+              return AsyncErrorView(error: friendsSnap.error!);
             }
-            if (!statusSnap.hasData) {
+            if (!friendsSnap.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            final status = statusSnap.data!;
+            final friends = friendsSnap.data!;
+            final candidates = all
+                .where((u) => u.uid != widget.signedInUid && !friends.contains(u.uid))
+                .toList(growable: false);
+            candidates.sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
 
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 520),
-                    child: Card(
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        side: BorderSide(color: theme.colorScheme.outlineVariant),
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            InkWell(
-                              borderRadius: BorderRadius.circular(18),
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => UserProfilePage(
-                                      currentUserUid: widget.signedInUid,
-                                      user: u,
-                                      social: widget.social,
+            if (candidates.isEmpty) {
+              return const Center(child: Text('No new students to discover right now.'));
+            }
+
+            final u = candidates[_index % max(candidates.length, 1)];
+
+            return StreamBuilder<FriendStatus>(
+              stream: widget.social.friendStatusStream(myUid: widget.signedInUid, otherUid: u.uid),
+              builder: (context, statusSnap) {
+                if (statusSnap.hasError) {
+                  return AsyncErrorView(error: statusSnap.error!);
+                }
+                if (!statusSnap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final status = statusSnap.data!;
+
+                return ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 520),
+                        child: Card(
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            side: BorderSide(color: theme.colorScheme.outlineVariant),
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(18),
+                                  onTap: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => UserProfilePage(
+                                          currentUserUid: widget.signedInUid,
+                                          user: u,
+                                          social: widget.social,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: Container(
+                                    height: 360,
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.surfaceContainerHighest,
+                                      borderRadius: BorderRadius.circular(18),
+                                    ),
+                                    child: Center(
+                                      child: CircleAvatar(
+                                        radius: 44,
+                                        backgroundImage: u.profileImageBytes == null
+                                            ? null
+                                            : MemoryImage(Uint8List.fromList(u.profileImageBytes!)),
+                                        child: u.profileImageBytes == null
+                                            ? const Icon(Icons.person, size: 54)
+                                            : null,
+                                      ),
                                     ),
                                   ),
-                                );
-                              },
-                              child: Container(
-                                height: 360,
-                                decoration: BoxDecoration(
-                                  color: theme.colorScheme.surfaceContainerHighest,
-                                  borderRadius: BorderRadius.circular(18),
                                 ),
-                                child: Center(
-                                  child: CircleAvatar(
-                                    radius: 44,
-                                    backgroundImage: u.profileImageBytes == null
-                                        ? null
-                                        : MemoryImage(Uint8List.fromList(u.profileImageBytes!)),
-                                    child: u.profileImageBytes == null ? const Icon(Icons.person, size: 54) : null,
-                                  ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  u.username,
+                                  style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              u.username,
-                              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              u.gender.label,
-                              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(u.bio.isEmpty ? 'No bio yet.' : u.bio),
-                            const SizedBox(height: 16),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: FilledButton.tonalIcon(
-                                    onPressed: () => _next(candidates.length),
-                                    icon: const Icon(Icons.close),
-                                    label: const Text('Pass'),
-                                  ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  u.gender.label,
+                                  style: theme.textTheme.bodyMedium
+                                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: FriendActionButton(
-                                    areFriends: status.areFriends,
-                                    hasOutgoing: status.hasOutgoingRequest,
-                                    hasIncoming: status.hasIncomingRequest,
-                                    onAdd: () => runAsyncAction(
+                                const SizedBox(height: 12),
+                                Text(u.bio.isEmpty ? 'No bio yet.' : u.bio),
+                                const SizedBox(height: 16),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: FilledButton.tonalIcon(
+                                        onPressed: () => _next(candidates.length),
+                                        icon: const Icon(Icons.close),
+                                        label: const Text('Pass'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: FriendActionButton(
+                                        areFriends: status.areFriends,
+                                        hasOutgoing: status.hasOutgoingRequest,
+                                        hasIncoming: status.hasIncomingRequest,
+                                        onAdd: () => runAsyncAction(
                                           context,
                                           () => widget.social.sendRequest(
                                             fromUid: widget.signedInUid,
                                             toUid: u.uid,
                                           ),
                                         ),
-                                    onAccept: () => runAsyncAction(
+                                        onAccept: () => runAsyncAction(
                                           context,
                                           () => widget.social.acceptIncoming(
                                             toUid: widget.signedInUid,
                                             fromUid: u.uid,
                                           ),
                                         ),
-                                  ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => UserProfilePage(
+                                          currentUserUid: widget.signedInUid,
+                                          user: u,
+                                          social: widget.social,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.info_outline),
+                                  label: const Text('View profile'),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 8),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => UserProfilePage(
-                                      currentUserUid: widget.signedInUid,
-                                      user: u,
-                                      social: widget.social,
-                                    ),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.info_outline),
-                              label: const Text('View profile'),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             );
           },
         );
@@ -258,45 +277,59 @@ class _BrowseDiscover extends StatelessWidget {
   Widget build(BuildContext context) {
     return FutureBuilder<List<AppUser>>(
       future: auth.getAllUsers(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return AsyncErrorView(error: snapshot.error!);
+      builder: (context, userSnap) {
+        if (userSnap.hasError) {
+          return AsyncErrorView(error: userSnap.error!);
         }
-        if (snapshot.connectionState != ConnectionState.done) {
+        if (userSnap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final all = snapshot.data ?? const <AppUser>[];
-        final users = all.where((u) => u.uid != signedInUid).toList(growable: false);
-        users.sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
+        final all = userSnap.data ?? const <AppUser>[];
 
-        if (users.isEmpty) {
-          return const Center(child: Text('No students yet. Create a second account to see Discover suggestions.'));
-        }
+        return StreamBuilder<Set<String>>(
+          stream: social.friendsStream(uid: signedInUid),
+          builder: (context, friendsSnap) {
+            if (friendsSnap.hasError) {
+              return AsyncErrorView(error: friendsSnap.error!);
+            }
+            if (!friendsSnap.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            final crossAxisCount = switch (width) {
-              >= 1100 => 5,
-              >= 800 => 4,
-              _ => 3,
-            };
+            final friends = friendsSnap.data!;
+            final users = all.where((u) => u.uid != signedInUid && !friends.contains(u.uid)).toList(growable: false);
+            users.sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
 
-            return GridView.builder(
-              padding: const EdgeInsets.all(16),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 0.78,
-              ),
-              itemCount: users.length,
-              itemBuilder: (context, index) {
-                return _BrowseTile(
-                  currentUid: signedInUid,
-                  user: users[index],
-                  social: social,
+            if (users.isEmpty) {
+              return const Center(child: Text('No new students to discover right now.'));
+            }
+
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final crossAxisCount = switch (width) {
+                  >= 1100 => 5,
+                  >= 800 => 4,
+                  _ => 3,
+                };
+
+                return GridView.builder(
+                  padding: const EdgeInsets.all(16),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 0.78,
+                  ),
+                  itemCount: users.length,
+                  itemBuilder: (context, index) {
+                    return _BrowseTile(
+                      currentUid: signedInUid,
+                      user: users[index],
+                      social: social,
+                    );
+                  },
                 );
               },
             );
@@ -331,6 +364,7 @@ class _BrowseTile extends StatelessWidget {
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
+
         final s = snap.data!;
 
         return Card(
@@ -393,13 +427,13 @@ class _BrowseTile extends StatelessWidget {
                       hasOutgoing: s.hasOutgoingRequest,
                       hasIncoming: s.hasIncomingRequest,
                       onAdd: () => runAsyncAction(
-                            context,
-                            () => social.sendRequest(fromUid: currentUid, toUid: user.uid),
-                          ),
+                        context,
+                        () => social.sendRequest(fromUid: currentUid, toUid: user.uid),
+                      ),
                       onAccept: () => runAsyncAction(
-                            context,
-                            () => social.acceptIncoming(toUid: currentUid, fromUid: user.uid),
-                          ),
+                        context,
+                        () => social.acceptIncoming(toUid: currentUid, fromUid: user.uid),
+                      ),
                       dense: true,
                     ),
                   ),

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// E2EE helper:
@@ -14,6 +15,8 @@ class E2ee {
 
   static const _storageKeyPrefix = 'vibeu.e2ee.x25519.privateKeyB64.';
 
+  String _seedStorageKey(String uid) => '$_storageKeyPrefix$uid';
+
   final FlutterSecureStorage _storage;
 
   /// Returns the user’s X25519 keypair, generating/storing it if missing.
@@ -21,7 +24,7 @@ class E2ee {
   /// We store a 32-byte seed (not the raw private key) so we can deterministically
   /// recreate both private + public keys later.
   Future<KeyPair> getOrCreateIdentityKeyPair({required String uid}) async {
-    final keyName = '$_storageKeyPrefix$uid';
+    final keyName = _seedStorageKey(uid);
     final existing = await _storage.read(key: keyName);
 
     final algorithm = X25519();
@@ -31,12 +34,24 @@ class E2ee {
       return algorithm.newKeyPairFromSeed(seed);
     }
 
-    final rnd = Random.secure();
+    final rnd = kIsWeb ? Random() : Random.secure();
     final seed = List<int>.generate(32, (_) => rnd.nextInt(256), growable: false);
     final keyPair = await algorithm.newKeyPairFromSeed(seed);
 
     await _storage.write(key: keyName, value: base64Encode(seed));
     return keyPair;
+  }
+
+  /// Returns the stored 32-byte seed if present.
+  Future<List<int>?> readIdentitySeed({required String uid}) async {
+    final raw = await _storage.read(key: _seedStorageKey(uid));
+    return raw == null ? null : base64Decode(raw);
+  }
+
+  /// Overwrite the stored seed (used for restore on a new device).
+  Future<void> writeIdentitySeed({required String uid, required List<int> seed32}) async {
+    if (seed32.length != 32) throw ArgumentError('seed must be 32 bytes');
+    await _storage.write(key: _seedStorageKey(uid), value: base64Encode(seed32));
   }
 
   Future<String> publicKeyB64(KeyPair keyPair) async {
