@@ -31,6 +31,14 @@ class ChatThreadPage extends StatefulWidget {
 }
 
 class _ChatThreadPageState extends State<ChatThreadPage> {
+  String _formatTime(DateTime dt) {
+    final h = dt.hour;
+    final m = dt.minute.toString().padLeft(2, '0');
+    final hour12 = (h % 12 == 0) ? 12 : (h % 12);
+    final ampm = h >= 12 ? 'PM' : 'AM';
+    return '$hour12:$m $ampm';
+  }
+
   final _controller = TextEditingController();
 
   FirestoreMessage? _replyTo;
@@ -111,31 +119,41 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                           final isMe = m.fromUid == widget.currentUser.uid;
                           final text = widget.chat.displayText(m);
 
+                          // WhatsApp-like colors: outgoing slightly tinted, incoming neutral.
                           final myBubble = isMatch
-                              ? theme.colorScheme.secondary.withValues(alpha: 0.25)
-                              : theme.colorScheme.primaryContainer;
+                              ? theme.colorScheme.secondary.withValues(alpha: 0.22)
+                              : theme.colorScheme.primary.withValues(alpha: 0.12);
                           final otherBubble = isMatch
-                              ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.65)
+                              ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.70)
                               : theme.colorScheme.surfaceContainerHighest;
 
-                          return SizedBox(
-                            width: double.infinity,
-                            child: SwipeToReply(
-                              replyFromRight: isMe,
-                              onReply: () => setState(() => _replyTo = m),
-                              child: Align(
-                                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(maxWidth: 520),
-                                  child: InkWell(
-                                    borderRadius: BorderRadius.circular(12),
-                                    onLongPress: () => _showMessageActions(context, m),
-                                    child: Card(
-                                      elevation: 0,
-                                      color: isMe ? myBubble : otherBubble,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                        child: Column(
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: SwipeToReply(
+                                replyFromRight: isMe,
+                                onReply: () => setState(() => _replyTo = m),
+                                child: Align(
+                                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(12),
+                                      onLongPress: () => _showMessageActions(context, m),
+                                      child: IntrinsicWidth(
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: isMe ? myBubble : otherBubble,
+                                            borderRadius: BorderRadius.only(
+                                              topLeft: const Radius.circular(16),
+                                              topRight: const Radius.circular(16),
+                                              bottomLeft: Radius.circular(isMe ? 16 : 4),
+                                              bottomRight: Radius.circular(isMe ? 4 : 16),
+                                            ),
+                                          ),
+                                          padding: const EdgeInsets.fromLTRB(12, 8, 10, 6),
+                                          child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
@@ -158,7 +176,24 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                                                   style: theme.textTheme.bodySmall,
                                                 ),
                                               ),
-                                            Text(text),
+                                            Stack(
+                                              children: [
+                                                Padding(
+                                                  padding: const EdgeInsets.only(right: 54, bottom: 14),
+                                                  child: Text(text),
+                                                ),
+                                                Positioned(
+                                                  right: 0,
+                                                  bottom: 0,
+                                                  child: Text(
+                                                    _formatTime(m.sentAt),
+                                                    style: theme.textTheme.labelSmall?.copyWith(
+                                                      color: theme.colorScheme.onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                             if (m.reactions.isNotEmpty) ...[
                                               const SizedBox(height: 8),
                                               ReactionRow(
@@ -173,6 +208,7 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                                               ),
                                             ],
                                           ],
+                                          ),
                                         ),
                                       ),
                                     ),

@@ -69,7 +69,7 @@ class _SwipeToReplyState extends State<SwipeToReply> with SingleTickerProviderSt
     final drag = _dx * sign;
     final reveal = drag.clamp(0.0, _maxDrag);
 
-    final iconScale = (reveal / _maxDrag).clamp(0.0, 1.0);
+    final iconProgress = (reveal / _maxDrag).clamp(0.0, 1.0);
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -100,13 +100,19 @@ class _SwipeToReplyState extends State<SwipeToReply> with SingleTickerProviderSt
       child: Stack(
         alignment: widget.replyFromRight ? Alignment.centerRight : Alignment.centerLeft,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Transform.scale(
-              scale: 0.8 + 0.2 * iconScale,
-              child: Icon(
-                Icons.reply,
-                color: theme.colorScheme.secondary.withValues(alpha: 0.85),
+          // Only show the icon while swiping.
+          IgnorePointer(
+            child: Opacity(
+              opacity: iconProgress,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Transform.scale(
+                  scale: 0.7 + 0.3 * iconProgress,
+                  child: Icon(
+                    Icons.reply,
+                    color: theme.colorScheme.secondary.withValues(alpha: 0.9),
+                  ),
+                ),
               ),
             ),
           ),
