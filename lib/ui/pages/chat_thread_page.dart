@@ -5,6 +5,8 @@ import '../../chat/firestore_chat_controller.dart';
 import '../../chat/firestore_chat_models.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_action.dart';
+import 'reaction_row.dart';
+import 'swipe_to_reply.dart';
 
 class ChatThreadPage extends StatefulWidget {
   const ChatThreadPage({
@@ -116,43 +118,63 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                               ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.65)
                               : theme.colorScheme.surfaceContainerHighest;
 
-                          return Align(
-                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 520),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onLongPress: () => setState(() => _replyTo = m),
-                                child: Card(
-                                  elevation: 0,
-                                  color: isMe ? myBubble : otherBubble,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (m.replyToText != null)
-                                          Container(
-                                            padding: const EdgeInsets.all(8),
-                                            margin: const EdgeInsets.only(bottom: 8),
-                                            decoration: BoxDecoration(
-                                              border: Border(
-                                                left: BorderSide(
-                                                  color: theme.colorScheme.primary,
-                                                  width: 3,
+                          return SizedBox(
+                            width: double.infinity,
+                            child: SwipeToReply(
+                              replyFromRight: isMe,
+                              onReply: () => setState(() => _replyTo = m),
+                              child: Align(
+                                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 520),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(12),
+                                    onLongPress: () => _showMessageActions(context, m),
+                                    child: Card(
+                                      elevation: 0,
+                                      color: isMe ? myBubble : otherBubble,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (m.replyToText != null)
+                                              Container(
+                                                padding: const EdgeInsets.all(8),
+                                                margin: const EdgeInsets.only(bottom: 8),
+                                                decoration: BoxDecoration(
+                                                  border: Border(
+                                                    left: BorderSide(
+                                                      color: theme.colorScheme.primary,
+                                                      width: 3,
+                                                    ),
+                                                  ),
+                                                ),
+                                                child: Text(
+                                                  m.replyToText!,
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: theme.textTheme.bodySmall,
                                                 ),
                                               ),
-                                            ),
-                                            child: Text(
-                                              m.replyToText!,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.bodySmall,
-                                            ),
-                                          ),
-                                        Text(text),
-                                      ],
+                                            Text(text),
+                                            if (m.reactions.isNotEmpty) ...[
+                                              const SizedBox(height: 8),
+                                              ReactionRow(
+                                                reactions: m.reactions,
+                                                myUid: widget.currentUser.uid,
+                                                onToggle: (emoji) => widget.chat.toggleReaction(
+                                                  threadId: widget.thread.id,
+                                                  messageId: m.id,
+                                                  emoji: emoji,
+                                                  uid: widget.currentUser.uid,
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -234,6 +256,79 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                       ],
                     ),
                   ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showMessageActions(BuildContext context, FirestoreMessage message) async {
+    final theme = Theme.of(context);
+    final quick = <String>['❤️', '😂', '😮', '😢', '😡', '👍'];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('React', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final e in quick)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          fireAndForget(
+                            widget.chat.toggleReaction(
+                              threadId: widget.thread.id,
+                              messageId: message.id,
+                              emoji: e,
+                              uid: widget.currentUser.uid,
+                            ),
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: theme.colorScheme.outlineVariant),
+                          ),
+                          child: Text(e, style: const TextStyle(fontSize: 18)),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.reply),
+                  title: const Text('Reply'),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    setState(() => _replyTo = message);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.copy_all_outlined),
+                  title: const Text('Copy'),
+                  onTap: () {
+                    // Clipboard import avoided; implement later if needed.
+                    Navigator.of(ctx).pop();
+                  },
                 ),
               ],
             ),

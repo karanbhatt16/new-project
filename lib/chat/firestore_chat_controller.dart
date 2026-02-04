@@ -179,6 +179,39 @@ class FirestoreChatController extends ChangeNotifier {
     return msgDoc.id;
   }
 
+  Future<void> toggleReaction({
+    required String threadId,
+    required String messageId,
+    required String emoji,
+    required String uid,
+  }) async {
+    final msgRef = _db.collection('threads').doc(threadId).collection('messages').doc(messageId);
+
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(msgRef);
+      final data = snap.data() as Map<String, dynamic>?;
+      if (data == null) return;
+
+      final reactions = (data['reactions'] as Map<String, dynamic>?) ?? <String, dynamic>{};
+      final existing = (reactions[emoji] as List?)?.whereType<String>().toList() ?? <String>[];
+
+      if (existing.contains(uid)) {
+        existing.remove(uid);
+      } else {
+        existing.add(uid);
+      }
+
+      // Keep the map clean: remove emoji key if empty.
+      if (existing.isEmpty) {
+        reactions.remove(emoji);
+      } else {
+        reactions[emoji] = existing;
+      }
+
+      tx.update(msgRef, {'reactions': reactions});
+    });
+  }
+
   String displayText(FirestoreMessage message) {
     if (message.text != null) return message.text!;
     if (message.ciphertextB64 != null) return '[Encrypted message]';

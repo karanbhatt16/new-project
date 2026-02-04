@@ -42,6 +42,7 @@ class FirestoreMessage {
     this.replyToMessageId,
     this.replyToFromUid,
     this.replyToText,
+    this.reactions = const <String, List<String>>{},
   });
 
   final String id;
@@ -60,11 +61,27 @@ class FirestoreMessage {
   final String? replyToFromUid;
   final String? replyToText;
 
+  /// Emoji -> list of uids.
+  final Map<String, List<String>> reactions;
+
   static FirestoreMessage fromDoc({
     required String threadId,
     required QueryDocumentSnapshot<Map<String, dynamic>> doc,
   }) {
     final d = doc.data();
+    final rawReactions = d['reactions'];
+    final reactions = <String, List<String>>{};
+    if (rawReactions is Map) {
+      for (final entry in rawReactions.entries) {
+        final k = entry.key;
+        final v = entry.value;
+        if (k is! String) continue;
+        if (v is List) {
+          reactions[k] = v.whereType<String>().toList(growable: false);
+        }
+      }
+    }
+
     return FirestoreMessage(
       id: doc.id,
       threadId: threadId,
@@ -77,6 +94,7 @@ class FirestoreMessage {
       replyToMessageId: d['replyToMessageId'] as String?,
       replyToFromUid: d['replyToFromUid'] as String?,
       replyToText: d['replyToText'] as String?,
+      reactions: reactions,
       sentAt: (d['sentAt'] as Timestamp?)?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
