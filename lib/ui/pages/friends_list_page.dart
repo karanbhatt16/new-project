@@ -4,6 +4,7 @@ import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_error_view.dart';
+import 'user_profile_page.dart';
 
 class FriendsListPage extends StatefulWidget {
   const FriendsListPage({
@@ -101,6 +102,15 @@ class _FriendsListPageState extends State<FriendsListPage> {
                           leading: const CircleAvatar(child: Icon(Icons.person)),
                           title: Text(u.username, style: const TextStyle(fontWeight: FontWeight.w700)),
                           subtitle: Text(u.email, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => UserProfilePage(
+                                currentUserUid: widget.signedInUid,
+                                user: u,
+                                social: widget.social,
+                              ),
+                            ),
+                          ),
                         );
                       },
                     );
