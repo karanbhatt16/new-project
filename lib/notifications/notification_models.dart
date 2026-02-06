@@ -8,6 +8,7 @@ enum NotificationType {
   friendRequestCancelled,
   message,
   postLike,
+  postComment,
   storyLike,
 }
 

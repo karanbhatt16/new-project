@@ -204,6 +204,10 @@ class FirestorePostsController {
     final postRef = _db.collection('posts').doc(postId);
     final commentRef = postRef.collection('comments').doc();
 
+    // Get post owner to send notification
+    final postSnap = await postRef.get();
+    final postOwnerUid = postSnap.data()?['createdByUid'] as String?;
+
     await _db.runTransaction((tx) async {
       tx.set(commentRef, {
         'authorUid': authorUid,
@@ -215,6 +219,19 @@ class FirestorePostsController {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     });
+
+    // Send notification to post owner (if not commenting on own post)
+    if (postOwnerUid != null && postOwnerUid != authorUid) {
+      final notifRef = _db.collection('users').doc(postOwnerUid).collection('notifications').doc();
+      await notifRef.set({
+        'toUid': postOwnerUid,
+        'fromUid': authorUid,
+        'type': 'postComment',
+        'targetId': postId,
+        'read': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
 
     return commentRef.id;
   }

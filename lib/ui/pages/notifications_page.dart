@@ -80,6 +80,7 @@ class NotificationsPage extends StatelessWidget {
                     NotificationType.friendRequestCancelled => '$actorName cancelled a friend request',
                     NotificationType.message => 'New message from $actorName',
                     NotificationType.postLike => '$actorName liked your post',
+                    NotificationType.postComment => '$actorName commented on your post',
                     NotificationType.storyLike => '$actorName liked your story',
                   };
 
