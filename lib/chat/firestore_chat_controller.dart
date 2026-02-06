@@ -46,6 +46,24 @@ class FirestoreChatController extends ChangeNotifier {
     final id = _threadIdForUids(myUid, otherUid);
     final doc = _db.collection('threads').doc(id);
 
+    // Check if thread already exists
+    final existingSnap = await doc.get();
+    
+    if (existingSnap.exists) {
+      // Thread exists - just return it without updating timestamp
+      // This prevents the conversation from jumping to top when just opened
+      final data = existingSnap.data() as Map<String, dynamic>;
+      return FirestoreChatThread(
+        id: id,
+        userAUid: data['userAUid'] as String,
+        userBUid: data['userBUid'] as String,
+        userAEmail: (data['userAEmail'] as String?) ?? '',
+        userBEmail: (data['userBEmail'] as String?) ?? '',
+        lastMessageAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+      );
+    }
+
+    // Thread doesn't exist - create it with timestamp
     await doc.set({
       'type': 'direct',
       'userAUid': myUid.compareTo(otherUid) <= 0 ? myUid : otherUid,
@@ -53,7 +71,8 @@ class FirestoreChatController extends ChangeNotifier {
       'userAEmail': myUid.compareTo(otherUid) <= 0 ? myEmail : otherEmail,
       'userBEmail': myUid.compareTo(otherUid) <= 0 ? otherEmail : myEmail,
       'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+      'createdAt': FieldValue.serverTimestamp(),
+    });
 
     final snap = await doc.get();
     final data = snap.data() as Map<String, dynamic>;
