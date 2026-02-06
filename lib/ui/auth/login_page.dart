@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../auth/firebase_auth_controller.dart';
-import 'otp_verification_dialog.dart';
 import 'signup_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -73,22 +72,9 @@ class _LoginPageState extends State<LoginPage>
       _error = null;
     });
 
-    // First, verify email with OTP
     final email = _emailController.text.trim();
-    final verified = await showOtpVerificationDialog(
-      context: context,
-      email: email,
-    );
 
-    if (!verified) {
-      setState(() {
-        _submitting = false;
-        _error = 'Email verification cancelled.';
-      });
-      return;
-    }
-
-    // OTP verified, proceed with login
+    // Login with email and password
     final err = await widget.controller.signIn(
       email: email,
       password: _passwordController.text,
