@@ -447,6 +447,7 @@ class FirestoreChatController extends ChangeNotifier {
   /// A message is considered unread if:
   /// - It was sent to this user (toUid == myUid)
   /// - It hasn't been marked as read
+  /// Uses includeMetadataChanges to show cached data immediately when offline.
   Stream<bool> hasUnreadMessagesStream({required String myUid}) {
     return _db
         .collection('users')
@@ -454,11 +455,13 @@ class FirestoreChatController extends ChangeNotifier {
         .collection('notifications')
         .where('type', isEqualTo: 'message')
         .where('read', isEqualTo: false)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.isNotEmpty);
   }
 
   /// Stream of the last message for a specific thread.
+  /// 
+  /// Uses includeMetadataChanges to show cached data immediately when offline.
   Stream<FirestoreMessage?> lastMessageStream({required String threadId}) {
     return _db
         .collection('threads')
@@ -466,7 +469,7 @@ class FirestoreChatController extends ChangeNotifier {
         .collection('messages')
         .orderBy('sentAt', descending: true)
         .limit(1)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) {
       if (snap.docs.isEmpty) return null;
       return FirestoreMessage.fromDoc(threadId: threadId, doc: snap.docs.first);
@@ -476,6 +479,7 @@ class FirestoreChatController extends ChangeNotifier {
   /// Stream of unread message count for a specific thread.
   /// 
   /// Counts messages sent TO the current user that haven't been read.
+  /// Uses includeMetadataChanges to show cached data immediately when offline.
   Stream<int> unreadCountStream({required String threadId, required String myUid}) {
     return _db
         .collection('threads')
@@ -483,7 +487,35 @@ class FirestoreChatController extends ChangeNotifier {
         .collection('messages')
         .where('toUid', isEqualTo: myUid)
         .where('read', isEqualTo: false)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.length);
+  }
+
+  /// Get a thread by ID, preferring cache for instant loading.
+  /// 
+  /// Uses GetOptions.source to try cache first, then fall back to server.
+  Future<FirestoreChatThread?> getThreadByIdCached(String threadId) async {
+    try {
+      // Try cache first for instant loading
+      final doc = await _db.collection('threads').doc(threadId).get(
+        const GetOptions(source: Source.cache),
+      );
+      final data = doc.data();
+      if (data != null) {
+        return FirestoreChatThread(
+          id: doc.id,
+          userAUid: data['userAUid'] as String,
+          userBUid: data['userBUid'] as String,
+          userAEmail: (data['userAEmail'] as String?) ?? '',
+          userBEmail: (data['userBEmail'] as String?) ?? '',
+          lastMessageAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+        );
+      }
+    } catch (_) {
+      // Cache miss, fall through to server
+    }
+
+    // Fall back to server
+    return getThreadById(threadId);
   }
 }
