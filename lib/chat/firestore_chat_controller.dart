@@ -472,4 +472,18 @@ class FirestoreChatController extends ChangeNotifier {
       return FirestoreMessage.fromDoc(threadId: threadId, doc: snap.docs.first);
     });
   }
+
+  /// Stream of unread message count for a specific thread.
+  /// 
+  /// Counts messages sent TO the current user that haven't been read.
+  Stream<int> unreadCountStream({required String threadId, required String myUid}) {
+    return _db
+        .collection('threads')
+        .doc(threadId)
+        .collection('messages')
+        .where('toUid', isEqualTo: myUid)
+        .where('read', isEqualTo: false)
+        .snapshots()
+        .map((snap) => snap.docs.length);
+  }
 }

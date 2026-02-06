@@ -374,11 +374,21 @@ class _MessagesPageState extends State<MessagesPage> {
                                                 ? widget.chat.displayText(lastMsg) 
                                                 : null;
 
-                                            return ConversationTile(
-                                              otherUser: other,
-                                              lastMessageText: lastMessageText,
-                                              unread: 0,
-                                              onTap: () => _openChatWith(current: currentUser, other: other),
+                                            return StreamBuilder<int>(
+                                              stream: widget.chat.unreadCountStream(
+                                                threadId: t.id, 
+                                                myUid: currentUser.uid,
+                                              ),
+                                              builder: (context, unreadSnap) {
+                                                final unreadCount = unreadSnap.data ?? 0;
+
+                                                return ConversationTile(
+                                                  otherUser: other,
+                                                  lastMessageText: lastMessageText,
+                                                  unread: unreadCount,
+                                                  onTap: () => _openChatWith(current: currentUser, other: other),
+                                                );
+                                              },
                                             );
                                           },
                                         );
