@@ -116,6 +116,91 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
     _controller.selection = TextSelection.collapsed(offset: newCursorPosition);
   }
 
+  /// Determines if a date separator should be shown before this message.
+  /// Shows separator for first message of each day.
+  bool _shouldShowDateSeparator({
+    required List<FirestoreMessage> messages,
+    required int currentIndex,
+  }) {
+    if (currentIndex == 0) return true; // Always show for first message
+    
+    final currentMsg = messages[currentIndex];
+    final previousMsg = messages[currentIndex - 1];
+    
+    final currentDate = DateTime(
+      currentMsg.sentAt.year,
+      currentMsg.sentAt.month,
+      currentMsg.sentAt.day,
+    );
+    final previousDate = DateTime(
+      previousMsg.sentAt.year,
+      previousMsg.sentAt.month,
+      previousMsg.sentAt.day,
+    );
+    
+    return currentDate != previousDate;
+  }
+
+  /// Formats the date for the separator (Today, Yesterday, Monday, or full date).
+  String _formatDateSeparator(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate = DateTime(date.year, date.month, date.day);
+    final difference = today.difference(messageDate).inDays;
+
+    if (difference == 0) {
+      return 'Today';
+    } else if (difference == 1) {
+      return 'Yesterday';
+    } else if (difference < 7) {
+      // Show day name (Monday, Tuesday, etc.)
+      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      return days[date.weekday - 1];
+    } else {
+      // Show full date
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${date.day} ${months[date.month - 1]} ${date.year}';
+    }
+  }
+
+  /// Builds the date separator widget.
+  Widget _buildDateSeparator(DateTime date, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Divider(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                _formatDateSeparator(date),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Divider(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<Set<String>>(
@@ -214,6 +299,12 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                         itemCount: messages.length,
                         itemBuilder: (context, index) {
                           final m = messages[messages.length - 1 - index];
+                          
+                          // Check if we need to show a date separator
+                          final showDateSeparator = _shouldShowDateSeparator(
+                            messages: messages,
+                            currentIndex: messages.length - 1 - index,
+                          );
                           final isMe = m.fromUid == widget.currentUser.uid;
                           final isDeleted = m.isDeletedFor(widget.currentUser.uid);
                           final text = widget.chat.displayText(m, forUid: widget.currentUser.uid);
@@ -243,9 +334,15 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                           // Add extra bottom padding if message has reactions (for the overlapping badge)
                           final hasReactions = m.reactions.isNotEmpty && !isDeleted;
                           
-                          return Padding(
-                            padding: EdgeInsets.only(bottom: hasReactions ? 22 : 4),
-                            child: SwipeToReply(
+                          return Column(
+                            children: [
+                              // Date separator (shown above the first message of each day)
+                              if (showDateSeparator)
+                                _buildDateSeparator(m.sentAt, theme),
+                              
+                              Padding(
+                                padding: EdgeInsets.only(bottom: hasReactions ? 22 : 4),
+                                child: SwipeToReply(
                               replyFromRight: isMe,
                               onReply: isDeleted ? () {} : () => setState(() => _replyTo = m),
                               child: GestureDetector(
@@ -403,6 +500,8 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                                 ),
                               ),
                             ),
+                              ),
+                            ],
                           );
                         },
                       );
