@@ -38,17 +38,6 @@ class MessagesPage extends StatefulWidget {
 class _MessagesPageState extends State<MessagesPage> {
   final _searchController = TextEditingController();
 
-  late final Future<AppUser?> _currentUserFuture;
-  late final Future<List<AppUser>> _allUsersFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    // Cache futures so switching tabs doesn't refetch and cause UI lag.
-    _currentUserFuture = widget.auth.publicProfileByUid(widget.signedInUid);
-    _allUsersFuture = widget.auth.getAllUsers();
-  }
-
   @override
   void dispose() {
     _searchController.dispose();
@@ -83,8 +72,8 @@ class _MessagesPageState extends State<MessagesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<AppUser?>(
-      future: _currentUserFuture,
+    return StreamBuilder<AppUser?>(
+      stream: widget.auth.profileStreamByUid(widget.signedInUid),
       builder: (context, userSnap) {
         final currentUser = userSnap.data;
         if (currentUser == null) {
@@ -99,8 +88,8 @@ class _MessagesPageState extends State<MessagesPage> {
               return const Center(child: CircularProgressIndicator());
             }
 
-            return FutureBuilder<List<AppUser>>(
-              future: _allUsersFuture,
+            return StreamBuilder<List<AppUser>>(
+              stream: widget.auth.allUsersStream(),
               builder: (context, allSnap) {
                 final allUsers = allSnap.data;
                 if (allUsers == null) {

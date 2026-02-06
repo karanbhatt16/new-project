@@ -106,9 +106,9 @@ class FirestoreSocialGraphController {
   String matchRequestId(String fromUid, String toUid) => '$fromUid->$toUid';
 
   Stream<Set<String>> friendsStream({required String uid}) {
-    return _db.collection('users').doc(uid).collection('friends').snapshots().map(
-          (snap) => snap.docs.map((d) => d.id).toSet(),
-        );
+    return _db.collection('users').doc(uid).collection('friends')
+        .snapshots(includeMetadataChanges: true)
+        .map((snap) => snap.docs.map((d) => d.id).toSet());
   }
 
   Stream<List<FriendRequest>> incomingRequestsStream({required String uid}) {
@@ -117,7 +117,7 @@ class FirestoreSocialGraphController {
         .where('toUid', isEqualTo: uid)
         .where('status', isEqualTo: 'pending')
         .orderBy('createdAt', descending: true)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.map((d) => FriendRequest.fromDoc(d)).toList(growable: false));
   }
 
@@ -129,7 +129,7 @@ class FirestoreSocialGraphController {
         .where('toUid', isEqualTo: uid)
         .where('status', isEqualTo: 'pending')
         .orderBy('createdAt', descending: true)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.map((d) => MatchRequest.fromDoc(d)).toList(growable: false));
   }
 
@@ -139,7 +139,7 @@ class FirestoreSocialGraphController {
         .where('fromUid', isEqualTo: uid)
         .where('status', isEqualTo: 'pending')
         .orderBy('createdAt', descending: true)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.map((d) => MatchRequest.fromDoc(d)).toList(growable: false));
   }
 
@@ -368,7 +368,7 @@ class FirestoreSocialGraphController {
         .where('fromUid', isEqualTo: uid)
         .where('status', isEqualTo: 'pending')
         .orderBy('createdAt', descending: true)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.map((d) => FriendRequest.fromDoc(d)).toList(growable: false));
   }
 

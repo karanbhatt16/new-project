@@ -12,6 +12,7 @@ class FirestoreNotificationsController {
 
   final FirebaseFirestore _db;
 
+  /// Stream of notifications for a user with real-time updates.
   Stream<List<AppNotification>> notificationsStream({required String uid, int limit = 100}) {
     return _db
         .collection('users')
@@ -19,17 +20,18 @@ class FirestoreNotificationsController {
         .collection('notifications')
         .orderBy('createdAt', descending: true)
         .limit(limit)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.map(AppNotification.fromDoc).toList(growable: false));
   }
 
+  /// Stream of unread notification count with real-time updates.
   Stream<int> unreadCountStream({required String uid}) {
     return _db
         .collection('users')
         .doc(uid)
         .collection('notifications')
         .where('read', isEqualTo: false)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.size);
   }
 

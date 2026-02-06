@@ -61,6 +61,17 @@ class FirebaseAuthController extends ChangeNotifier {
   Future<List<AppUser>> getAllUsers() => users.fetchAllUsers();
   Future<AppUser?> getUserByEmail(String email) => users.fetchUserByEmail(email);
 
+  /// Stream of all users for real-time updates when new users join.
+  Stream<List<AppUser>> allUsersStream() {
+    return _db
+        .collection('users')
+        .snapshots(includeMetadataChanges: true)
+        .map((snap) => snap.docs.map((doc) {
+              final data = doc.data();
+              return _userFromMap(doc.id, data);
+            }).toList(growable: false));
+  }
+
   Future<void> signOut() async {
     await _auth.signOut();
   }
@@ -159,8 +170,9 @@ class FirebaseAuthController extends ChangeNotifier {
     return _userFromMap(uid, data);
   }
 
+  /// Stream a user's profile for real-time updates.
   Stream<AppUser?> profileStreamByUid(String uid) {
-    return _db.collection('users').doc(uid).snapshots().map((doc) {
+    return _db.collection('users').doc(uid).snapshots(includeMetadataChanges: true).map((doc) {
       final data = doc.data();
       if (data == null) return null;
       return _userFromMap(uid, data);
@@ -171,14 +183,14 @@ class FirebaseAuthController extends ChangeNotifier {
   ///
   /// Expected field: users/{uid}.activeMatchWithUid (string|null)
   Stream<String?> activeMatchWithUidStream(String uid) {
-    return _db.collection('users').doc(uid).snapshots().map((doc) {
+    return _db.collection('users').doc(uid).snapshots(includeMetadataChanges: true).map((doc) {
       final data = doc.data();
       return data?['activeMatchWithUid'] as String?;
     });
   }
 
   Stream<String?> activeCoupleThreadIdStream(String uid) {
-    return _db.collection('users').doc(uid).snapshots().map((doc) {
+    return _db.collection('users').doc(uid).snapshots(includeMetadataChanges: true).map((doc) {
       final data = doc.data();
       return data?['activeCoupleThreadId'] as String?;
     });

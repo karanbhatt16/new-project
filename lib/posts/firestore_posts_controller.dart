@@ -25,16 +25,20 @@ class FirestorePostsController {
   final FirebaseStorage _storage;
   final CloudinaryUploader _cloudinary;
 
+  /// Stream all PUBLISHED posts, newest first.
+  /// Uses includeMetadataChanges for real-time updates and offline cache.
   Stream<List<Post>> postsStream({int limit = 50}) {
     return _db
         .collection('posts')
         .where('status', isEqualTo: 'PUBLISHED')
         .orderBy('createdAt', descending: true)
         .limit(limit)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.map(Post.fromDoc).toList(growable: false));
   }
 
+  /// Stream posts by a specific user.
+  /// Uses includeMetadataChanges for real-time updates and offline cache.
   Stream<List<Post>> userPostsStream({required String uid, int limit = 200}) {
     return _db
         .collection('posts')
@@ -42,7 +46,7 @@ class FirestorePostsController {
         .where('status', isEqualTo: 'PUBLISHED')
         .orderBy('createdAt', descending: true)
         .limit(limit)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.map(Post.fromDoc).toList(growable: false));
   }
 
@@ -101,13 +105,15 @@ class FirestorePostsController {
     }
   }
 
+  /// Stream if a post is liked by a user.
+  /// Uses includeMetadataChanges for real-time updates.
   Stream<bool> isLikedStream({required String postId, required String uid}) {
     return _db
         .collection('posts')
         .doc(postId)
         .collection('likes')
         .doc(uid)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((doc) => doc.exists);
   }
 
@@ -184,6 +190,7 @@ class FirestorePostsController {
   // -----------------------
 
   /// Stream of comments for a post, ordered by creation time.
+  /// Uses includeMetadataChanges for real-time updates.
   Stream<List<Comment>> commentsStream({required String postId, int limit = 100}) {
     return _db
         .collection('posts')
@@ -191,7 +198,7 @@ class FirestorePostsController {
         .collection('comments')
         .orderBy('createdAt', descending: false)
         .limit(limit)
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs.map((doc) => Comment.fromDoc(doc, postId)).toList(growable: false));
   }
 
