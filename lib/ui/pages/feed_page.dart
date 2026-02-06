@@ -21,7 +21,7 @@ class FeedPage extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F0F1A) : const Color(0xFFF5F6FA),
+      backgroundColor: theme.colorScheme.surface,
       floatingActionButton: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(

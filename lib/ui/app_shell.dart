@@ -318,9 +318,7 @@ class _AppShellState extends State<AppShell> {
       appBar: AppBar(
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: isDark 
-            ? const Color(0xFF1A1A2E).withValues(alpha: 0.95)
-            : Colors.white.withValues(alpha: 0.95),
+        backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.95),
         title: Row(
           children: [
             Container(
@@ -395,7 +393,7 @@ class _AppShellState extends State<AppShell> {
                               color: theme.colorScheme.error,
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                                color: theme.colorScheme.surface,
                                 width: 2,
                               ),
                             ),
@@ -429,9 +427,7 @@ class _AppShellState extends State<AppShell> {
           final hasUnreadMessages = snapshot.data ?? false;
           return Container(
             decoration: BoxDecoration(
-              color: isDark 
-                  ? const Color(0xFF1A1A2E).withValues(alpha: 0.95)
-                  : Colors.white.withValues(alpha: 0.95),
+              color: theme.colorScheme.surface.withValues(alpha: 0.95),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
@@ -517,7 +513,7 @@ class _AppShellState extends State<AppShell> {
                         color: theme.colorScheme.error,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                          color: theme.colorScheme.surface,
                           width: 1.5,
                         ),
                       ),

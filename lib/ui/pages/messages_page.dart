@@ -119,7 +119,7 @@ class _MessagesPageState extends State<MessagesPage> {
                 final isDark = theme.brightness == Brightness.dark;
 
                 return Container(
-                  color: isDark ? const Color(0xFF0F0F1A) : const Color(0xFFF5F6FA),
+                  color: theme.colorScheme.surface,
                   child: Column(
                     children: [
                       // Search bar

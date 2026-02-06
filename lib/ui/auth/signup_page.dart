@@ -230,14 +230,14 @@ class _SignupPageState extends State<SignupPage>
             end: Alignment.bottomRight,
             colors: isDark
                 ? [
-                    const Color(0xFF1A1A2E),
-                    const Color(0xFF16213E),
-                    const Color(0xFF0F3460),
+                    theme.colorScheme.surface,
+                    theme.colorScheme.surfaceContainerLow,
+                    theme.colorScheme.surfaceContainer,
                   ]
                 : [
-                    const Color(0xFFF8F9FF),
-                    const Color(0xFFE8EAFF),
-                    const Color(0xFFD4D8FF),
+                    theme.colorScheme.surface,
+                    theme.colorScheme.surfaceContainerLow,
+                    theme.colorScheme.surfaceContainerHigh,
                   ],
           ),
         ),

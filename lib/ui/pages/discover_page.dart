@@ -180,15 +180,10 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: isDark
-                      ? [
-                          const Color(0xFF1A1A2E),
-                          const Color(0xFF0F0F1A),
-                        ]
-                      : [
-                          const Color(0xFFF8F9FF),
-                          const Color(0xFFEEF0FF),
-                        ],
+                  colors: [
+                    theme.colorScheme.surface,
+                    theme.colorScheme.surfaceContainerLow,
+                  ],
                 ),
               ),
               child: Column(

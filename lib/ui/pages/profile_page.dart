@@ -43,7 +43,7 @@ class ProfilePage extends StatelessWidget {
         final me = snapshot.data;
 
         return Container(
-          color: isDark ? const Color(0xFF0F0F1A) : const Color(0xFFF5F6FA),
+          color: theme.colorScheme.surface,
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
             children: [
@@ -54,15 +54,10 @@ class ProfilePage extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: isDark
-                        ? [
-                            const Color(0xFF1A1A2E),
-                            const Color(0xFF16213E),
-                          ]
-                        : [
-                            Colors.white,
-                            const Color(0xFFF8F9FF),
-                          ],
+                    colors: [
+                      theme.colorScheme.surfaceContainerLow,
+                      theme.colorScheme.surfaceContainer,
+                    ],
                   ),
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
@@ -112,7 +107,7 @@ class ProfilePage extends StatelessWidget {
                             child: Container(
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                                color: theme.colorScheme.surface,
                               ),
                               padding: const EdgeInsets.all(3),
                               child: ClipOval(
@@ -144,7 +139,7 @@ class ProfilePage extends StatelessWidget {
                               color: theme.colorScheme.primary,
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                                color: theme.colorScheme.surface,
                                 width: 3,
                               ),
                             ),
