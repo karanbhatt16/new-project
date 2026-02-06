@@ -735,32 +735,6 @@ class _RightSidebar extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'Suggestions',
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 12),
-          const _SuggestionTile(name: 'Ananya • CSE', subtitle: '2nd year • Music, travel'),
-          const _SuggestionTile(name: 'Sahil • Mechanical', subtitle: '3rd year • Gym, anime'),
-          const _SuggestionTile(name: 'Riya • IT', subtitle: '1st year • Photography'),
-          const SizedBox(height: 24),
-          Text(
-            'Upcoming on campus',
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 12),
-          const _InfoCard(
-            title: 'Cultural Night',
-            subtitle: 'Fri 7:00 PM • Auditorium',
-            icon: Icons.celebration,
-          ),
-          const SizedBox(height: 12),
-          const _InfoCard(
-            title: 'Hackathon mixer',
-            subtitle: 'Sat 5:00 PM • LT-2',
-            icon: Icons.code,
-          ),
-          const SizedBox(height: 24),
-          Text(
             'Privacy',
             style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
@@ -772,53 +746,6 @@ class _RightSidebar extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SuggestionTile extends StatelessWidget {
-  const _SuggestionTile({required this.name, required this.subtitle});
-
-  final String name;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const CircleAvatar(child: Icon(Icons.person)),
-      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: FilledButton.tonal(
-        onPressed: null,
-        child: const Text('Connect'),
-      ),
-    );
-  }
-}
-
-class _InfoCard extends StatelessWidget {
-  const _InfoCard({required this.title, required this.subtitle, required this.icon});
-
-  final String title;
-  final String subtitle;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        side: BorderSide(color: theme.colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(child: Icon(icon)),
-        title: Text(title),
-        subtitle: Text(subtitle),
       ),
     );
   }
