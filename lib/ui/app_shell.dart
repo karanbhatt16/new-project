@@ -283,6 +283,7 @@ class _AppShellState extends State<AppShell> {
               signedInUid: widget.signedInUid,
               auth: widget.auth,
               notifications: widget.notifications,
+              social: widget.social,
               hasUnreadMessagesStream: _hasUnreadMessagesStream,
               unreadNotificationsStream: _unreadNotificationsStream,
             ),
@@ -364,6 +365,7 @@ class _AppShellState extends State<AppShell> {
                           signedInUid: widget.signedInUid,
                           auth: widget.auth,
                           notifications: widget.notifications,
+                          social: widget.social,
                         ),
                       ),
                     );
@@ -598,6 +600,7 @@ class _LeftRail extends StatelessWidget {
     required this.signedInUid,
     required this.auth,
     required this.notifications,
+    required this.social,
     required this.hasUnreadMessagesStream,
     required this.unreadNotificationsStream,
   });
@@ -608,6 +611,7 @@ class _LeftRail extends StatelessWidget {
   final String signedInUid;
   final FirebaseAuthController auth;
   final FirestoreNotificationsController notifications;
+  final FirestoreSocialGraphController social;
   final Stream<bool> hasUnreadMessagesStream;
   final Stream<int> unreadNotificationsStream;
 
@@ -696,6 +700,7 @@ class _LeftRail extends StatelessWidget {
                             signedInUid: signedInUid,
                             auth: auth,
                             notifications: notifications,
+                            social: social,
                           ),
                         ),
                       );
