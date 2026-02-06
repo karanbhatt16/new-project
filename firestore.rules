@@ -1,0 +1,249 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isMe(uid) { return signedIn() && request.auth.uid == uid; }
+
+    function isThreadMember(threadDoc) {
+      return signedIn() &&
+        (threadDoc.data.userAUid == request.auth.uid ||
+         threadDoc.data.userBUid == request.auth.uid);
+    }
+
+    function otherUidFromThread(threadDoc) {
+      return threadDoc.data.userAUid == request.auth.uid
+        ? threadDoc.data.userBUid
+        : threadDoc.data.userAUid;
+    }
+
+    function stillMatchedWith(otherUid) {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid))
+        .data.activeMatchWithUid == otherUid;
+    }
+
+    function isCoupleThread(threadDoc) {
+      return threadDoc.data.type == "couple";
+    }
+
+    // Direct thread: membership only
+    // Couple thread: membership + still matched with the other user
+    function canAccessThread(threadDoc) {
+      return isThreadMember(threadDoc) &&
+        ( !isCoupleThread(threadDoc) || stillMatchedWith(otherUidFromThread(threadDoc)) );
+    }
+
+    // -----------------------
+    // Friend requests
+    // -----------------------
+    match /friend_requests/{requestId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid is string
+        && request.resource.data.status == "pending";
+
+      allow update: if signedIn()
+        && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+
+      allow delete: if false;
+    }
+    
+    // -----------------------
+    // Voice Calls
+    // -----------------------
+    match /calls/{callId} {
+      // Allow reading if user is caller or callee
+      allow read: if signedIn()
+        && (resource.data.callerUid == request.auth.uid
+            || resource.data.calleeUid == request.auth.uid);
+
+      // Allow creating a call if user is the caller
+      allow create: if signedIn()
+        && request.resource.data.callerUid == request.auth.uid
+        && request.resource.data.calleeUid is string
+        && request.resource.data.status == "ringing";
+
+      // Allow updating if user is caller or callee
+      allow update: if signedIn()
+        && (resource.data.callerUid == request.auth.uid
+            || resource.data.calleeUid == request.auth.uid);
+
+      allow delete: if false;
+
+      // ICE candidates from caller
+      match /callerCandidates/{candidateId} {
+        allow read: if signedIn()
+          && get(/databases/$(database)/documents/calls/$(callId)).data.calleeUid == request.auth.uid;
+
+        allow create: if signedIn()
+          && get(/databases/$(database)/documents/calls/$(callId)).data.callerUid == request.auth.uid;
+
+        allow update, delete: if false;
+      }
+
+      // ICE candidates from callee
+      match /calleeCandidates/{candidateId} {
+        allow read: if signedIn()
+          && get(/databases/$(database)/documents/calls/$(callId)).data.callerUid == request.auth.uid;
+
+        allow create: if signedIn()
+          && get(/databases/$(database)/documents/calls/$(callId)).data.calleeUid == request.auth.uid;
+
+        allow update, delete: if false;
+      }
+    }
+
+    // -----------------------
+    // Match requests
+    // -----------------------
+    match /match_requests/{requestId} {
+      allow read: if signedIn()
+        && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+
+      allow create: if signedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid is string
+        && request.resource.data.status == "pending";
+
+      allow update: if signedIn()
+        && (
+          (resource.data.fromUid == request.auth.uid && request.resource.data.status == "cancelled") ||
+          (resource.data.toUid == request.auth.uid &&
+            (request.resource.data.status == "accepted" || request.resource.data.status == "declined"))
+        );
+
+      allow delete: if false;
+    }
+
+    // -----------------------
+    // Matches
+    // -----------------------
+    match /matches/{matchId} {
+      allow read: if signedIn()
+        && (resource.data.userAUid == request.auth.uid || resource.data.userBUid == request.auth.uid);
+
+      // Client-driven for now (quick unblock). Prefer Cloud Functions later.
+      allow create: if signedIn()
+        && (request.resource.data.userAUid == request.auth.uid || request.resource.data.userBUid == request.auth.uid);
+
+      allow update: if signedIn()
+        && (resource.data.userAUid == request.auth.uid || resource.data.userBUid == request.auth.uid);
+
+      allow delete: if false;
+    }
+
+    // -----------------------
+    // Users (profiles + friends + notifications + swipes)
+    // -----------------------
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if isMe(uid);
+
+      // Permissive because you currently write match pointers from client.
+      // Later: restrict and move match pointers to Cloud Functions.
+      allow update: if isMe(uid);
+
+      match /friends/{friendUid} {
+        allow read: if isMe(uid);
+        
+        // Allow create if:
+        // 1. User is adding to their own friends list, OR
+        // 2. User is adding themselves to another user's friends list 
+        //    (when accepting a friend request - friendUid is the current user)
+        allow create: if isMe(uid) || (signedIn() && friendUid == request.auth.uid);
+        
+        allow delete: if isMe(uid);
+        allow update: if false;
+      }
+
+      match /swipes/{otherUid} {
+        allow read: if isMe(uid);
+        allow create, update, delete: if isMe(uid);
+      }
+
+      match /notifications/{nid} {
+        allow get, list: if isMe(uid);
+
+        allow create: if signedIn()
+          && request.resource.data.toUid == uid
+          && request.resource.data.fromUid == request.auth.uid
+          && request.resource.data.read == false;
+
+        allow update: if isMe(uid);
+        allow delete: if false;
+      }
+
+      match /key_backups/{docId} {
+        allow read, write: if isMe(uid);
+      }
+    }
+
+    // -----------------------
+    // Threads + messages
+    // -----------------------
+    match /threads/{threadId} {
+      allow read: if signedIn() && canAccessThread(resource);
+
+      // Thread creation should be server-side ideally.
+      allow create: if signedIn();
+
+      allow update: if signedIn() && isThreadMember(resource);
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read, create: if signedIn()
+          && canAccessThread(get(/databases/$(database)/documents/threads/$(threadId)));
+
+        // Allow reactions-only updates (for emoji reacts)
+        allow update: if signedIn()
+          && canAccessThread(get(/databases/$(database)/documents/threads/$(threadId)))
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['reactions']);
+
+        allow delete: if false;
+      }
+    }
+
+    // -----------------------
+    // Posts + reports + likes + comments
+    // -----------------------
+    match /posts/{postId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.createdByUid == request.auth.uid;
+
+      allow update, delete: if signedIn()
+        && resource.data.createdByUid == request.auth.uid;
+
+      // allow signed-in users to update only likeCount/commentCount/updatedAt
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).changedKeys()
+            .hasOnly(['likeCount', 'commentCount', 'updatedAt']);
+
+      match /likes/{likerUid} {
+        allow read: if signedIn();
+        allow create, delete: if signedIn() && request.auth.uid == likerUid;
+      }
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        
+        allow create: if signedIn()
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.text is string;
+        
+        allow delete: if signedIn()
+          && resource.data.authorUid == request.auth.uid;
+        
+        allow update: if false;
+      }
+
+      match /reports/{reportId} {
+        allow read: if false;
+        allow create: if signedIn();
+      }
+    }
+  }
+}

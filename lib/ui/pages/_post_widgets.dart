@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -111,11 +112,13 @@ class PostCard extends StatelessWidget {
                   },
                 ),
                 Text('${post.likeCount}'),
-                const SizedBox(width: 12),
-                Text(
-                  'Reports: ${post.reportCount}',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Comments',
+                  onPressed: () => _showCommentsSheet(context),
+                  icon: const Icon(Icons.chat_bubble_outline),
                 ),
+                Text('${post.commentCount}'),
                 const Spacer(),
                 IconButton(
                   tooltip: 'Report',
@@ -126,6 +129,19 @@ class PostCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showCommentsSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CommentsSheet(
+        post: post,
+        currentUid: currentUid,
+        posts: posts,
       ),
     );
   }
@@ -182,5 +198,352 @@ class PostCard extends StatelessWidget {
         );
       },
     ).whenComplete(details.dispose);
+  }
+}
+
+/// Bottom sheet for displaying and adding comments.
+class _CommentsSheet extends StatefulWidget {
+  const _CommentsSheet({
+    required this.post,
+    required this.currentUid,
+    required this.posts,
+  });
+
+  final Post post;
+  final String currentUid;
+  final FirestorePostsController posts;
+
+  @override
+  State<_CommentsSheet> createState() => _CommentsSheetState();
+}
+
+class _CommentsSheetState extends State<_CommentsSheet> {
+  final _commentController = TextEditingController();
+  final _focusNode = FocusNode();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitComment() async {
+    final text = _commentController.text.trim();
+    if (text.isEmpty) return;
+
+    setState(() => _submitting = true);
+
+    try {
+      await widget.posts.addComment(
+        postId: widget.post.id,
+        authorUid: widget.currentUid,
+        text: text,
+      );
+      _commentController.clear();
+      _focusNode.unfocus();
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inDays > 0) return '${diff.inDays}d ago';
+    if (diff.inHours > 0) return '${diff.inHours}h ago';
+    if (diff.inMinutes > 0) return '${diff.inMinutes}m ago';
+    return 'Just now';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        children: [
+          // Handle bar
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          
+          // Header
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Text(
+                  'Comments',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${widget.post.commentCount}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          ),
+          
+          const Divider(height: 1),
+
+          // Comments list
+          Expanded(
+            child: StreamBuilder<List<Comment>>(
+              stream: widget.posts.commentsStream(postId: widget.post.id),
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final comments = snap.data!;
+                if (comments.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline,
+                          size: 48,
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'No comments yet',
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Be the first to comment!',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  itemCount: comments.length,
+                  itemBuilder: (context, index) {
+                    final comment = comments[index];
+                    return _CommentTile(
+                      comment: comment,
+                      currentUid: widget.currentUid,
+                      posts: widget.posts,
+                      timeAgo: _timeAgo(comment.createdAt),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+
+          // Comment input
+          Container(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + bottomInset),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _commentController,
+                    focusNode: _focusNode,
+                    decoration: InputDecoration(
+                      hintText: 'Add a comment...',
+                      filled: true,
+                      fillColor: isDark
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.grey.withValues(alpha: 0.1),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _submitComment(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        theme.colorScheme.primary,
+                        theme.colorScheme.secondary,
+                      ],
+                    ),
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    onPressed: _submitting ? null : _submitComment,
+                    icon: _submitting
+                        ? SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send_rounded, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Single comment tile.
+class _CommentTile extends StatelessWidget {
+  const _CommentTile({
+    required this.comment,
+    required this.currentUid,
+    required this.posts,
+    required this.timeAgo,
+  });
+
+  final Comment comment;
+  final String currentUid;
+  final FirestorePostsController posts;
+  final String timeAgo;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isOwner = comment.authorUid == currentUid;
+
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance.collection('users').doc(comment.authorUid).get(),
+      builder: (context, snap) {
+        final data = snap.data?.data();
+        final username = (data?['username'] as String?) ?? 'Unknown';
+
+        MemoryImage? avatar;
+        final b64 = data?['profileImageB64'] as String?;
+        if (b64 != null && b64.isNotEmpty) {
+          try {
+            avatar = MemoryImage(base64Decode(b64));
+          } catch (_) {
+            avatar = null;
+          }
+        }
+
+        final initial = (username.isNotEmpty ? username.substring(0, 1) : '?').toUpperCase();
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundImage: avatar,
+                child: avatar == null ? Text(initial, style: const TextStyle(fontSize: 14)) : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          username,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          timeAgo,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      comment.text,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              if (isOwner)
+                IconButton(
+                  onPressed: () => runAsyncAction(
+                    context,
+                    () => posts.deleteComment(
+                      postId: comment.postId,
+                      commentId: comment.id,
+                      requesterUid: currentUid,
+                    ),
+                  ),
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 18,
+                    color: theme.colorScheme.error,
+                  ),
+                  tooltip: 'Delete',
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }

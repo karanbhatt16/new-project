@@ -11,6 +11,7 @@ class Post {
     required this.status,
     required this.reportCount,
     required this.likeCount,
+    required this.commentCount,
     this.imagePath,
     this.imageUrl,
     this.imageProvider,
@@ -33,6 +34,7 @@ class Post {
   final String status;
   final int reportCount;
   final int likeCount;
+  final int commentCount;
 
   static Post fromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final d = doc.data();
@@ -47,6 +49,35 @@ class Post {
       status: (d['status'] as String?) ?? 'PUBLISHED',
       reportCount: (d['reportCount'] as int?) ?? 0,
       likeCount: (d['likeCount'] as int?) ?? 0,
+      commentCount: (d['commentCount'] as int?) ?? 0,
+    );
+  }
+}
+
+@immutable
+class Comment {
+  const Comment({
+    required this.id,
+    required this.postId,
+    required this.authorUid,
+    required this.text,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String postId;
+  final String authorUid;
+  final String text;
+  final DateTime createdAt;
+
+  static Comment fromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc, String postId) {
+    final d = doc.data();
+    return Comment(
+      id: doc.id,
+      postId: postId,
+      authorUid: d['authorUid'] as String,
+      text: (d['text'] as String?) ?? '',
+      createdAt: (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }

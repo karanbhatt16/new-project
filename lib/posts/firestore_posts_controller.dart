@@ -6,6 +6,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'cloudinary_uploader.dart';
 import 'post_models.dart';
 
+export 'post_models.dart' show Comment;
+
 class FirestorePostsController {
   FirestorePostsController({
     FirebaseFirestore? firestore,
@@ -71,6 +73,7 @@ class FirestorePostsController {
       'status': 'PUBLISHED',
       'reportCount': 0,
       'likeCount': 0,
+      'commentCount': 0,
     });
 
     return postId;
@@ -174,6 +177,77 @@ class FirestorePostsController {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     }
+  }
+
+  // -----------------------
+  // Comments
+  // -----------------------
+
+  /// Stream of comments for a post, ordered by creation time.
+  Stream<List<Comment>> commentsStream({required String postId, int limit = 100}) {
+    return _db
+        .collection('posts')
+        .doc(postId)
+        .collection('comments')
+        .orderBy('createdAt', descending: false)
+        .limit(limit)
+        .snapshots()
+        .map((snap) => snap.docs.map((doc) => Comment.fromDoc(doc, postId)).toList(growable: false));
+  }
+
+  /// Add a comment to a post.
+  Future<String> addComment({
+    required String postId,
+    required String authorUid,
+    required String text,
+  }) async {
+    final postRef = _db.collection('posts').doc(postId);
+    final commentRef = postRef.collection('comments').doc();
+
+    await _db.runTransaction((tx) async {
+      tx.set(commentRef, {
+        'authorUid': authorUid,
+        'text': text.trim(),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      tx.set(postRef, {
+        'commentCount': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    });
+
+    return commentRef.id;
+  }
+
+  /// Delete a comment (only by the comment author).
+  Future<void> deleteComment({
+    required String postId,
+    required String commentId,
+    required String requesterUid,
+  }) async {
+    final postRef = _db.collection('posts').doc(postId);
+    final commentRef = postRef.collection('comments').doc(commentId);
+
+    await _db.runTransaction((tx) async {
+      final commentSnap = await tx.get(commentRef);
+      final data = commentSnap.data();
+      if (data == null) return;
+
+      if (data['authorUid'] != requesterUid) {
+        throw StateError('Not allowed');
+      }
+
+      tx.delete(commentRef);
+      
+      // Decrement comment count
+      final postSnap = await tx.get(postRef);
+      final currentCount = (postSnap.data()?['commentCount'] as num?)?.toInt() ?? 0;
+      final newCount = currentCount - 1;
+      tx.set(postRef, {
+        'commentCount': newCount < 0 ? 0 : newCount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    });
   }
 
 }
