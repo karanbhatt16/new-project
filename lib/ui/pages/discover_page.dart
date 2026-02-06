@@ -78,7 +78,29 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
           return AsyncErrorView(error: snap.error!);
         }
         if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          final theme = Theme.of(context);
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Finding people for you...',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                ),
+              ],
+            ),
+          );
         }
 
         final me = snap.data!.$1;
@@ -150,39 +172,106 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
               return rnd.nextBool() ? 1 : -1;
             });
 
-            return Column(
-              children: [
-                SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+            final theme = Theme.of(context);
+            final isDark = theme.brightness == Brightness.dark;
+
+            return Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: isDark
+                      ? [
+                          const Color(0xFF1A1A2E),
+                          const Color(0xFF0F0F1A),
+                        ]
+                      : [
+                          const Color(0xFFF8F9FF),
+                          const Color(0xFFEEF0FF),
+                        ],
+                ),
+              ),
+              child: Column(
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
                     child: Row(
                       children: [
-                        Text(
-                          'Match',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                        // Title with icon
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Colors.pink, Colors.orange],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.pink.withValues(alpha: 0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.local_fire_department_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Discover',
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                Text(
+                                  '${candidates.length} people nearby',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                         const Spacer(),
-                        IconButton(
-                          tooltip: 'Match requests',
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => MatchRequestsPage(
-                                  currentUid: widget.signedInUid,
-                                  auth: widget.auth,
-                                  social: widget.social,
+                        // Match requests button
+                        Container(
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.1)
+                                : Colors.grey.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: IconButton(
+                            tooltip: 'Match requests',
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => MatchRequestsPage(
+                                    currentUid: widget.signedInUid,
+                                    auth: widget.auth,
+                                    social: widget.social,
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.inbox_outlined),
+                              );
+                            },
+                            icon: const Icon(Icons.favorite_border_rounded),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ),
-                Expanded(
+                  // Swipe deck
+                  Expanded(
                   child: SwipeDeck(
                     users: candidates,
                     mutualInterestsByUid: mutualByUid,
@@ -229,8 +318,9 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
                 }
                     },
                   ),
-                ),
-              ],
+                  ),
+                ],
+              ),
             );
           },
         );

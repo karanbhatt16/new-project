@@ -310,30 +310,111 @@ class _AppShellState extends State<AppShell> {
       );
     }
 
+    final isDark = theme.brightness == Brightness.dark;
+    
     return Scaffold(
+      extendBody: true,
       appBar: AppBar(
-        title: const Text('vibeU'),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: isDark 
+            ? const Color(0xFF1A1A2E).withValues(alpha: 0.95)
+            : Colors.white.withValues(alpha: 0.95),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    theme.colorScheme.primary,
+                    theme.colorScheme.secondary,
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.favorite_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'vibeU',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+              ),
+            ),
+          ],
+        ),
         actions: [
           StreamBuilder<int>(
             stream: _unreadNotificationsStream,
             builder: (context, snapshot) {
-              final hasUnread = (snapshot.data ?? 0) > 0;
-              return IconButton(
-                tooltip: 'Notifications',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => NotificationsPage(
-                        signedInUid: widget.signedInUid,
-                        auth: widget.auth,
-                        notifications: widget.notifications,
+              final unreadCount = snapshot.data ?? 0;
+              return Container(
+                margin: const EdgeInsets.only(right: 8),
+                child: IconButton(
+                  tooltip: 'Notifications',
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => NotificationsPage(
+                          signedInUid: widget.signedInUid,
+                          auth: widget.auth,
+                          notifications: widget.notifications,
+                        ),
                       ),
-                    ),
-                  );
-                },
-                icon: _BadgeIcon(
-                  icon: Icons.favorite_border,
-                  showBadge: hasUnread,
+                    );
+                  },
+                  icon: Stack(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.1)
+                              : Colors.grey.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.notifications_outlined,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      if (unreadCount > 0)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.error,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                                width: 2,
+                              ),
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 18,
+                              minHeight: 18,
+                            ),
+                            child: Text(
+                              unreadCount > 9 ? '9+' : unreadCount.toString(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -345,25 +426,117 @@ class _AppShellState extends State<AppShell> {
         stream: _hasUnreadMessagesStream,
         builder: (context, snapshot) {
           final hasUnreadMessages = snapshot.data ?? false;
-          return NavigationBar(
-            selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
-            destinations: [
-              for (int i = 0; i < _destinations.length; i++)
-                NavigationDestination(
-                  icon: _BadgeIcon(
-                    icon: _destinations[i].icon,
-                    showBadge: i == 2 && hasUnreadMessages, // Index 2 is Chats
-                  ),
-                  selectedIcon: _BadgeIcon(
-                    icon: _destinations[i].selectedIcon,
-                    showBadge: i == 2 && hasUnreadMessages,
-                  ),
-                  label: _destinations[i].label,
+          return Container(
+            decoration: BoxDecoration(
+              color: isDark 
+                  ? const Color(0xFF1A1A2E).withValues(alpha: 0.95)
+                  : Colors.white.withValues(alpha: 0.95),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
+                  blurRadius: 20,
+                  offset: const Offset(0, -5),
                 ),
-            ],
+              ],
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    for (int i = 0; i < _destinations.length; i++)
+                      _buildNavItem(
+                        index: i,
+                        icon: _destinations[i].icon,
+                        selectedIcon: _destinations[i].selectedIcon,
+                        label: _destinations[i].label,
+                        isSelected: _index == i,
+                        showBadge: i == 2 && hasUnreadMessages,
+                        theme: theme,
+                        isDark: isDark,
+                        onTap: () => setState(() => _index = i),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           );
         },
+      ),
+    );
+  }
+  
+  Widget _buildNavItem({
+    required int index,
+    required IconData icon,
+    required IconData selectedIcon,
+    required String label,
+    required bool isSelected,
+    required bool showBadge,
+    required ThemeData theme,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: EdgeInsets.symmetric(
+          horizontal: isSelected ? 20 : 16,
+          vertical: 10,
+        ),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? theme.colorScheme.primary.withValues(alpha: 0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              children: [
+                Icon(
+                  isSelected ? selectedIcon : icon,
+                  color: isSelected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  size: 24,
+                ),
+                if (showBadge)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.error,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            if (isSelected) ...[
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

@@ -116,41 +116,116 @@ class _MessagesPageState extends State<MessagesPage> {
                     ? friends
                     : friends.where((u) => u.username.toLowerCase().contains(query)).toList(growable: false);
 
-                return Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.search),
-                          hintText: 'Search friends by username to chat…',
-                          border: OutlineInputBorder(),
+                final isDark = theme.brightness == Brightness.dark;
+
+                return Container(
+                  color: isDark ? const Color(0xFF0F0F1A) : const Color(0xFFF5F6FA),
+                  child: Column(
+                    children: [
+                      // Search bar
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: TextField(
+                            controller: _searchController,
+                            style: theme.textTheme.bodyLarge,
+                            decoration: InputDecoration(
+                              prefixIcon: Icon(
+                                Icons.search_rounded,
+                                color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                              ),
+                              hintText: 'Search friends...',
+                              hintStyle: theme.textTheme.bodyLarge?.copyWith(
+                                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                              ),
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
                         ),
-                        onChanged: (_) => setState(() {}),
                       ),
-                    ),
-                    Expanded(
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        children: [
-                          if (query.isNotEmpty) ...[
-                            Text('Start chat',
-                                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                            const SizedBox(height: 8),
-                            if (matches.isEmpty)
-                              Text(
-                                'No friends match “${_searchController.text.trim()}”.',
-                                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                              )
-                            else
-                              for (final u in matches)
-                                UserStartTile(
-                                  user: u,
-                                  onTap: () => _openChatWith(current: currentUser, other: u),
+                      Expanded(
+                        child: ListView(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                          children: [
+                            if (query.isNotEmpty) ...[
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Icon(
+                                        Icons.person_search_rounded,
+                                        size: 18,
+                                        color: theme.colorScheme.primary,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      'Search Results',
+                                      style: theme.textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                            const SizedBox(height: 16),
-                          ],
+                              ),
+                              if (matches.isEmpty)
+                                Container(
+                                  padding: const EdgeInsets.all(20),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.05)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.search_off_rounded,
+                                        size: 40,
+                                        color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'No friends found',
+                                        style: theme.textTheme.bodyMedium?.copyWith(
+                                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else
+                                for (final u in matches)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: _buildUserTile(u, currentUser, theme, isDark),
+                                  ),
+                              const SizedBox(height: 20),
+                            ],
 
                           StreamBuilder<String?>(
                             stream: widget.auth.activeMatchWithUidStream(currentUser.uid),
@@ -317,12 +392,69 @@ class _MessagesPageState extends State<MessagesPage> {
                       ),
                     ),
                   ],
+                ),
                 );
               },
             );
           },
         );
       },
+    );
+  }
+
+  Widget _buildUserTile(AppUser user, AppUser currentUser, ThemeData theme, bool isDark) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: theme.colorScheme.primary.withValues(alpha: 0.3),
+              width: 2,
+            ),
+          ),
+          child: UserAvatar(user: user, radius: 24),
+        ),
+        title: Text(
+          user.username,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          user.email,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            Icons.chat_bubble_outline_rounded,
+            color: theme.colorScheme.primary,
+            size: 20,
+          ),
+        ),
+        onTap: () => _openChatWith(current: currentUser, other: user),
+      ),
     );
   }
 }

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../ui/app_shell.dart';
 import 'firebase_auth_controller.dart';
-import '../ui/auth/login_page.dart';
+import '../ui/auth/welcome_page.dart';
 
 import '../social/firestore_social_graph_controller.dart';
 
@@ -33,7 +33,7 @@ class AuthGate extends StatelessWidget {
       builder: (context, _) {
         final fbUser = controller.firebaseUser;
         if (fbUser == null) {
-          return LoginPage(controller: controller);
+          return WelcomePage(controller: controller);
         }
 
         return FutureBuilder(
