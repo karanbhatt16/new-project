@@ -185,9 +185,34 @@ class _MatchActionIcon extends StatelessWidget {
     return StreamBuilder<MatchStatus>(
       stream: social.matchStatusStream(myUid: currentUserUid, otherUid: friendUid),
       builder: (context, snap) {
+        // Show loading indicator while waiting
+        if (snap.connectionState == ConnectionState.waiting) {
+          return SizedBox(
+            width: 40,
+            height: 40,
+            child: Center(
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.pink.shade200),
+              ),
+            ),
+          );
+        }
+
+        // Show error state or default icon if stream has error
+        if (snap.hasError) {
+          return Icon(Icons.favorite_border, color: Colors.pink.shade300);
+        }
+
         final status = snap.data;
         if (status == null) {
-          return const SizedBox(width: 40, height: 40);
+          // Default: show the send match request button
+          return IconButton(
+            icon: Icon(Icons.favorite_border, color: Colors.pink.shade300),
+            tooltip: 'Send match request to $friendUsername',
+            onPressed: () => _sendMatchRequest(context),
+          );
         }
 
         // Already matched with this person
