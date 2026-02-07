@@ -86,6 +86,60 @@ class MatchRequest {
   }
 }
 
+/// Represents a match (current or past) between two users.
+/// Match history is public - everyone can see who matched with whom.
+@immutable
+class Match {
+  const Match({
+    required this.id,
+    required this.userAUid,
+    required this.userBUid,
+    required this.state,
+    required this.requestedByUid,
+    this.requestedAt,
+    this.matchedAt,
+    this.brokenAt,
+    this.breakupInitiatedByUid,
+    this.coupleThreadId,
+  });
+
+  final String id;
+  final String userAUid;
+  final String userBUid;
+  final String state; // 'matched' or 'broken'
+  final String requestedByUid;
+  final DateTime? requestedAt;
+  final DateTime? matchedAt;
+  final DateTime? brokenAt;
+  final String? breakupInitiatedByUid;
+  final String? coupleThreadId;
+
+  bool get isActive => state == 'matched';
+  bool get isBroken => state == 'broken';
+
+  /// Returns the other user's UID given one user's UID.
+  String otherUid(String myUid) => myUid == userAUid ? userBUid : userAUid;
+
+  /// Check if a user is part of this match.
+  bool involves(String uid) => userAUid == uid || userBUid == uid;
+
+  static Match fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data()!;
+    return Match(
+      id: doc.id,
+      userAUid: d['userAUid'] as String,
+      userBUid: d['userBUid'] as String,
+      state: d['state'] as String? ?? 'matched',
+      requestedByUid: d['requestedByUid'] as String,
+      requestedAt: (d['requestedAt'] as Timestamp?)?.toDate(),
+      matchedAt: (d['matchedAt'] as Timestamp?)?.toDate(),
+      brokenAt: (d['brokenAt'] as Timestamp?)?.toDate(),
+      breakupInitiatedByUid: d['breakupInitiatedByUid'] as String?,
+      coupleThreadId: d['coupleThreadId'] as String?,
+    );
+  }
+}
+
 class FirestoreSocialGraphController {
   FirestoreSocialGraphController({
     FirebaseFirestore? firestore,
@@ -544,4 +598,185 @@ class FirestoreSocialGraphController {
 
     return friendsOfFriends;
   }
+
+  // =====================================================
+  // MATCH HISTORY (Public - visible to everyone)
+  // =====================================================
+
+  /// Stream all matches (current and past) for a user.
+  /// This is PUBLIC - anyone can view anyone's match history.
+  Stream<List<Match>> matchHistoryStream({required String uid}) {
+    // Query matches where user is either userA or userB
+    // We need two queries and merge them
+    final streamA = _db
+        .collection('matches')
+        .where('userAUid', isEqualTo: uid)
+        .orderBy('matchedAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => Match.fromDoc(d)).toList());
+
+    final streamB = _db
+        .collection('matches')
+        .where('userBUid', isEqualTo: uid)
+        .orderBy('matchedAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => Match.fromDoc(d)).toList());
+
+    // Combine both streams
+    return streamA.asyncExpand((listA) {
+      return streamB.map((listB) {
+        final combined = <Match>[...listA, ...listB];
+        // Sort by matchedAt descending, active matches first
+        combined.sort((a, b) {
+          // Active matches come first
+          if (a.isActive && !b.isActive) return -1;
+          if (!a.isActive && b.isActive) return 1;
+          // Then by date
+          final aDate = a.matchedAt ?? DateTime(1970);
+          final bDate = b.matchedAt ?? DateTime(1970);
+          return bDate.compareTo(aDate);
+        });
+        return combined;
+      });
+    });
+  }
+
+  /// Get current active match for a user (if any).
+  Future<Match?> getCurrentMatch({required String uid}) async {
+    final userDoc = await _db.collection('users').doc(uid).get();
+    final data = userDoc.data();
+    final activeMatchId = data?['activeMatchId'] as String?;
+    
+    if (activeMatchId == null || activeMatchId.isEmpty) return null;
+    
+    final matchDoc = await _db.collection('matches').doc(activeMatchId).get();
+    if (!matchDoc.exists) return null;
+    
+    return Match.fromDoc(matchDoc);
+  }
+
+  /// Stream the current active match for a user.
+  Stream<Match?> currentMatchStream({required String uid}) {
+    return _db.collection('users').doc(uid).snapshots().asyncMap((userSnap) async {
+      final data = userSnap.data();
+      final activeMatchId = data?['activeMatchId'] as String?;
+      
+      if (activeMatchId == null || activeMatchId.isEmpty) return null;
+      
+      final matchDoc = await _db.collection('matches').doc(activeMatchId).get();
+      if (!matchDoc.exists) return null;
+      
+      return Match.fromDoc(matchDoc);
+    });
+  }
+
+  /// Check if user is currently matched (has an active match).
+  Future<bool> isCurrentlyMatched({required String uid}) async {
+    final userDoc = await _db.collection('users').doc(uid).get();
+    final data = userDoc.data();
+    return (data?['activeMatchWithUid'] as String?) != null;
+  }
+
+  /// Get the UID of the user's current match partner (if any).
+  Future<String?> getCurrentMatchPartnerUid({required String uid}) async {
+    final userDoc = await _db.collection('users').doc(uid).get();
+    final data = userDoc.data();
+    return data?['activeMatchWithUid'] as String?;
+  }
+
+  /// Stream match status between current user and another user.
+  /// Returns information about their match relationship.
+  Stream<MatchStatus> matchStatusStream({required String myUid, required String otherUid}) {
+    final controller = StreamController<MatchStatus>();
+
+    Match? currentMatch;
+    List<MatchRequest>? incomingRequests;
+    List<MatchRequest>? outgoingRequests;
+    String? myActiveMatchWithUid;
+    String? otherActiveMatchWithUid;
+
+    void emit() {
+      if (incomingRequests == null || outgoingRequests == null) return;
+
+      final hasIncoming = incomingRequests!.any((r) => r.fromUid == otherUid && r.toUid == myUid);
+      final hasOutgoing = outgoingRequests!.any((r) => r.fromUid == myUid && r.toUid == otherUid);
+      final areMatched = currentMatch != null && currentMatch!.isActive && currentMatch!.involves(otherUid);
+      final iAmMatched = myActiveMatchWithUid != null;
+      final theyAreMatched = otherActiveMatchWithUid != null;
+
+      controller.add(MatchStatus(
+        areMatched: areMatched,
+        hasOutgoingRequest: hasOutgoing,
+        hasIncomingRequest: hasIncoming,
+        iAmAlreadyMatched: iAmMatched && !areMatched,
+        theyAreAlreadyMatched: theyAreMatched && !areMatched,
+        myMatchPartnerUid: myActiveMatchWithUid,
+        theirMatchPartnerUid: otherActiveMatchWithUid,
+      ));
+    }
+
+    late final StreamSubscription subMatch;
+    late final StreamSubscription subIn;
+    late final StreamSubscription subOut;
+    late final StreamSubscription subMyUser;
+    late final StreamSubscription subOtherUser;
+
+    subMatch = currentMatchStream(uid: myUid).listen((m) {
+      currentMatch = m;
+      emit();
+    }, onError: controller.addError);
+
+    subIn = incomingMatchRequestsStream(uid: myUid).listen((v) {
+      incomingRequests = v;
+      emit();
+    }, onError: controller.addError);
+
+    subOut = outgoingMatchRequestsStream(uid: myUid).listen((v) {
+      outgoingRequests = v;
+      emit();
+    }, onError: controller.addError);
+
+    subMyUser = _db.collection('users').doc(myUid).snapshots().listen((snap) {
+      myActiveMatchWithUid = snap.data()?['activeMatchWithUid'] as String?;
+      emit();
+    }, onError: controller.addError);
+
+    subOtherUser = _db.collection('users').doc(otherUid).snapshots().listen((snap) {
+      otherActiveMatchWithUid = snap.data()?['activeMatchWithUid'] as String?;
+      emit();
+    }, onError: controller.addError);
+
+    controller.onCancel = () async {
+      await subMatch.cancel();
+      await subIn.cancel();
+      await subOut.cancel();
+      await subMyUser.cancel();
+      await subOtherUser.cancel();
+      await controller.close();
+    };
+
+    return controller.stream;
+  }
+}
+
+/// Status of match relationship between two users.
+@immutable
+class MatchStatus {
+  const MatchStatus({
+    required this.areMatched,
+    required this.hasOutgoingRequest,
+    required this.hasIncomingRequest,
+    required this.iAmAlreadyMatched,
+    required this.theyAreAlreadyMatched,
+    this.myMatchPartnerUid,
+    this.theirMatchPartnerUid,
+  });
+
+  final bool areMatched;
+  final bool hasOutgoingRequest;
+  final bool hasIncomingRequest;
+  final bool iAmAlreadyMatched; // I have a match with someone else
+  final bool theyAreAlreadyMatched; // They have a match with someone else
+  final String? myMatchPartnerUid;
+  final String? theirMatchPartnerUid;
 }

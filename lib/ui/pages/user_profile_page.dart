@@ -6,6 +6,8 @@ import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_action.dart';
+import 'match_action_button.dart';
+import 'match_history_page.dart';
 
 class UserProfilePage extends StatelessWidget {
   const UserProfilePage({
@@ -130,6 +132,14 @@ class UserProfilePage extends StatelessWidget {
                 ],
               );
             },
+          ),
+          const SizedBox(height: 12),
+          // Match Section - visible to everyone
+          _MatchSection(
+            currentUserUid: currentUserUid,
+            profileUser: user,
+            social: social,
+            auth: auth,
           ),
         ],
       ),
@@ -546,6 +556,217 @@ class _AllFriendsPage extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Shows match status and history for a user's profile.
+/// This section is PUBLIC - everyone can see anyone's match history.
+class _MatchSection extends StatelessWidget {
+  const _MatchSection({
+    required this.currentUserUid,
+    required this.profileUser,
+    required this.social,
+    this.auth,
+  });
+
+  final String currentUserUid;
+  final AppUser profileUser;
+  final FirestoreSocialGraphController social;
+  final FirebaseAuthController? auth;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isOwnProfile = currentUserUid == profileUser.uid;
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.favorite, size: 20, color: Colors.pink.shade400),
+                const SizedBox(width: 8),
+                Text(
+                  'Relationship',
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            // Current match status
+            StreamBuilder<Match?>(
+              stream: social.currentMatchStream(uid: profileUser.uid),
+              builder: (context, matchSnap) {
+                final currentMatch = matchSnap.data;
+                final isMatched = currentMatch != null && currentMatch.isActive;
+
+                if (isMatched) {
+                  final partnerUid = currentMatch.otherUid(profileUser.uid);
+                  return FutureBuilder<AppUser?>(
+                    future: auth?.publicProfileByUid(partnerUid),
+                    builder: (context, partnerSnap) {
+                      final partner = partnerSnap.data;
+                      final partnerName = partner?.username ?? 'Someone';
+
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.pink.shade50,
+                              Colors.red.shade50,
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.pink.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 20,
+                              backgroundColor: Colors.pink.shade100,
+                              backgroundImage: partner?.profileImageBytes != null
+                                  ? MemoryImage(Uint8List.fromList(partner!.profileImageBytes!))
+                                  : null,
+                              child: partner?.profileImageBytes == null
+                                  ? Icon(Icons.favorite, color: Colors.pink.shade400, size: 20)
+                                  : null,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'In a relationship with',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: Colors.pink.shade700,
+                                    ),
+                                  ),
+                                  Text(
+                                    partnerName,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.favorite, color: Colors.pink, size: 20),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                }
+
+                // Not matched - show single status
+                return Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.favorite_border,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Single',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            
+            // Match action button (only for other users' profiles)
+            if (!isOwnProfile) ...[
+              const SizedBox(height: 12),
+              StreamBuilder<MatchStatus>(
+                stream: social.matchStatusStream(myUid: currentUserUid, otherUid: profileUser.uid),
+                builder: (context, statusSnap) {
+                  final status = statusSnap.data;
+                  if (status == null) {
+                    return const SizedBox.shrink();
+                  }
+
+                  return FutureBuilder<String?>(
+                    future: status.theirMatchPartnerUid != null && auth != null
+                        ? auth!.publicProfileByUid(status.theirMatchPartnerUid!).then((u) => u?.username)
+                        : Future.value(null),
+                    builder: (context, partnerNameSnap) {
+                      return MatchActionButton(
+                        status: status,
+                        otherUsername: profileUser.username,
+                        theirPartnerUsername: partnerNameSnap.data,
+                        onSendRequest: () => runAsyncAction(
+                          context,
+                          () => social.sendMatchRequest(fromUid: currentUserUid, toUid: profileUser.uid),
+                          successMessage: 'Match request sent!',
+                        ),
+                        onAcceptRequest: () => runAsyncAction(
+                          context,
+                          () => social.acceptMatchRequest(toUid: currentUserUid, fromUid: profileUser.uid),
+                          successMessage: 'You matched! 🎉',
+                        ),
+                        onBreakUp: () => runAsyncAction(
+                          context,
+                          () => social.breakMatch(uid: currentUserUid),
+                          successMessage: 'Relationship ended',
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
+            
+            // View match history link
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: auth != null
+                  ? () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => MatchHistoryPage(
+                            profileUid: profileUser.uid,
+                            profileUsername: profileUser.username,
+                            currentUserUid: currentUserUid,
+                            auth: auth!,
+                            social: social,
+                            isOwnProfile: isOwnProfile,
+                          ),
+                        ),
+                      );
+                    }
+                  : null,
+              icon: const Icon(Icons.history, size: 18),
+              label: Text(
+                isOwnProfile ? 'View your match history' : 'View ${profileUser.username}\'s match history',
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

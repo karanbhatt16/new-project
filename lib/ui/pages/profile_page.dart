@@ -11,6 +11,7 @@ import '../../posts/post_models.dart';
 import '../widgets/async_action.dart';
 import 'edit_profile_page.dart';
 import 'friends_list_page.dart';
+import 'match_history_page.dart';
 import 'my_post_detail_page.dart';
 import 'post_image_widget.dart';
 
@@ -297,6 +298,147 @@ class ProfilePage extends StatelessWidget {
             ),
             const SizedBox(height: 12),
 
+            // Match/Relationship Section
+            _SectionCard(
+              title: 'Relationship',
+              child: StreamBuilder<Match?>(
+                stream: social.currentMatchStream(uid: signedInUid),
+                builder: (context, matchSnap) {
+                  final currentMatch = matchSnap.data;
+                  final isMatched = currentMatch != null && currentMatch.isActive;
+
+                  if (isMatched) {
+                    final partnerUid = currentMatch.otherUid(signedInUid);
+                    return FutureBuilder<AppUser?>(
+                      future: auth.publicProfileByUid(partnerUid),
+                      builder: (context, partnerSnap) {
+                        final partner = partnerSnap.data;
+                        final partnerName = partner?.username ?? 'Loading...';
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Current match display
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.pink.shade50,
+                                    Colors.red.shade50,
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.pink.shade200),
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 24,
+                                    backgroundColor: Colors.pink.shade100,
+                                    backgroundImage: partner?.profileImageBytes != null
+                                        ? MemoryImage(Uint8List.fromList(partner!.profileImageBytes!))
+                                        : null,
+                                    child: partner?.profileImageBytes == null
+                                        ? Icon(Icons.favorite, color: Colors.pink.shade400)
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'In a relationship with',
+                                          style: theme.textTheme.bodySmall?.copyWith(
+                                            color: Colors.pink.shade700,
+                                          ),
+                                        ),
+                                        Text(
+                                          partnerName,
+                                          style: theme.textTheme.titleMedium?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.favorite, color: Colors.pink),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            // Action buttons
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => _confirmBreakUp(context, partnerName),
+                                    icon: const Icon(Icons.heart_broken, size: 18),
+                                    label: const Text('Break Up'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.red,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: FilledButton.tonalIcon(
+                                    onPressed: () => _navigateToMatchHistory(context, me),
+                                    icon: const Icon(Icons.history, size: 18),
+                                    label: const Text('History'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  }
+
+                  // Not matched - show single status
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.favorite_border,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Single',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.tonalIcon(
+                        onPressed: () => _navigateToMatchHistory(context, me),
+                        icon: const Icon(Icons.history),
+                        label: const Text('View Match History'),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+
             _SectionCard(
               title: 'About',
               child: Column(
@@ -514,6 +656,53 @@ class ProfilePage extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  void _navigateToMatchHistory(BuildContext context, AppUser? user) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MatchHistoryPage(
+          profileUid: signedInUid,
+          profileUsername: user?.username ?? 'You',
+          currentUserUid: signedInUid,
+          auth: auth,
+          social: social,
+          isOwnProfile: true,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmBreakUp(BuildContext context, String partnerName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Break Up?'),
+        content: Text(
+          'Are you sure you want to break up with $partnerName? '
+          'This will end your relationship and everyone will be able to see it in your match history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Break Up'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      await runAsyncAction(
+        context,
+        () => social.breakMatch(uid: signedInUid),
+        successMessage: 'Relationship ended',
+      );
+    }
   }
 
   IconData _genderIcon(Gender? gender) {

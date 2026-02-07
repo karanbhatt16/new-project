@@ -118,13 +118,15 @@ service cloud.firestore {
     }
 
     // -----------------------
-    // Matches
+    // Matches (PUBLIC read - everyone can see match history)
     // -----------------------
     match /matches/{matchId} {
-      allow read: if signedIn()
-        && (resource.data.userAUid == request.auth.uid || resource.data.userBUid == request.auth.uid);
+      // PUBLIC READ: Anyone signed in can view match history
+      // This allows users to see who has matched with whom (current and past)
+      allow read: if signedIn();
 
       // Client-driven for now (quick unblock). Prefer Cloud Functions later.
+      // Only participants can create/update matches
       allow create: if signedIn()
         && (request.resource.data.userAUid == request.auth.uid || request.resource.data.userBUid == request.auth.uid);
 
