@@ -8,6 +8,7 @@ import '../ui/auth/welcome_page.dart';
 import '../social/firestore_social_graph_controller.dart';
 
 import '../chat/firestore_chat_controller.dart';
+import '../chat/e2ee_chat_controller.dart';
 import '../notifications/firestore_notifications_controller.dart';
 import '../posts/firestore_posts_controller.dart';
 
@@ -17,6 +18,7 @@ class AuthGate extends StatefulWidget {
     required this.controller,
     required this.social,
     required this.chat,
+    required this.e2eeChat,
     required this.notifications,
     required this.posts,
   });
@@ -24,6 +26,7 @@ class AuthGate extends StatefulWidget {
   final FirebaseAuthController controller;
   final FirestoreSocialGraphController social;
   final FirestoreChatController chat;
+  final E2eeChatController e2eeChat;
   final FirestoreNotificationsController notifications;
   final FirestorePostsController posts;
 
@@ -81,6 +84,7 @@ class _AuthGateState extends State<AuthGate> {
               auth: widget.controller,
               social: widget.social,
               chat: widget.chat,
+              e2eeChat: widget.e2eeChat,
               notifications: widget.notifications,
               posts: widget.posts,
             );

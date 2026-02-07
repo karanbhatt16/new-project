@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -7,9 +6,13 @@ import 'package:flutter/material.dart';
 import '../../posts/firestore_posts_controller.dart';
 import '../../posts/post_models.dart';
 import '../widgets/async_action.dart';
+import '../widgets/skeleton_widgets.dart';
 import 'post_image_widget.dart';
 
-class PostCard extends StatelessWidget {
+export '../widgets/skeleton_widgets.dart' show PostCardSkeleton, CommentSkeleton;
+
+/// Post card with optimistic like updates
+class PostCard extends StatefulWidget {
   const PostCard({
     super.key,
     required this.post,
@@ -20,6 +23,54 @@ class PostCard extends StatelessWidget {
   final Post post;
   final String currentUid;
   final FirestorePostsController posts;
+
+  @override
+  State<PostCard> createState() => _PostCardState();
+}
+
+class _PostCardState extends State<PostCard> {
+  // Optimistic state for likes
+  bool? _optimisticLiked;
+  int? _optimisticLikeCount;
+  bool _isLikeInProgress = false;
+
+  /// Check if the post has an image (either imageUrl or imagePath)
+  bool get _hasImage {
+    final post = widget.post;
+    return (post.imageUrl != null && post.imageUrl!.isNotEmpty) ||
+           (post.imagePath != null && post.imagePath!.isNotEmpty);
+  }
+
+  void _handleLikeTap(bool currentLiked) async {
+    if (_isLikeInProgress) return;
+
+    // Optimistic update - immediately update UI
+    setState(() {
+      _isLikeInProgress = true;
+      _optimisticLiked = !currentLiked;
+      _optimisticLikeCount = (_optimisticLikeCount ?? widget.post.likeCount) + (currentLiked ? -1 : 1);
+      if (_optimisticLikeCount! < 0) _optimisticLikeCount = 0;
+    });
+
+    try {
+      // Fire and forget - don't wait for server response
+      widget.posts.toggleLike(postId: widget.post.id, uid: widget.currentUid).catchError((e) {
+        // Revert on error
+        if (mounted) {
+          setState(() {
+            _optimisticLiked = null;
+            _optimisticLikeCount = null;
+          });
+        }
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLikeInProgress = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +88,7 @@ class PostCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance.collection('users').doc(post.createdByUid).snapshots(),
+              stream: FirebaseFirestore.instance.collection('users').doc(widget.post.createdByUid).snapshots(),
               builder: (context, snap) {
                 final data = snap.data?.data();
                 final username = (data?['username'] as String?) ?? 'Unknown';
@@ -70,12 +121,12 @@ class PostCard extends StatelessWidget {
                         style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                       ),
                     ),
-                    if (post.createdByUid == currentUid)
+                    if (widget.post.createdByUid == widget.currentUid)
                       IconButton(
                         tooltip: 'Delete',
                         onPressed: () => runAsyncAction(
                           context,
-                          () => posts.deletePost(postId: post.id, requesterUid: currentUid),
+                          () => widget.posts.deletePost(postId: widget.post.id, requesterUid: widget.currentUid),
                         ),
                         icon: const Icon(Icons.delete_outline),
                       ),
@@ -83,42 +134,72 @@ class PostCard extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: PostImage(post: post),
+            if (_hasImage) ...[
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: PostImage(post: widget.post),
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
-            if (post.caption.isNotEmpty) Text(post.caption),
+            ],
+            if (widget.post.caption.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                widget.post.caption,
+                style: theme.textTheme.bodyLarge,
+              ),
+            ],
             const SizedBox(height: 8),
             Row(
               children: [
                 StreamBuilder<bool>(
-                  stream: posts.isLikedStream(postId: post.id, uid: currentUid),
+                  stream: widget.posts.isLikedStream(postId: widget.post.id, uid: widget.currentUid),
                   builder: (context, snap) {
-                    final liked = snap.data ?? false;
+                    // Use optimistic state if available, otherwise use stream data
+                    final serverLiked = snap.data ?? false;
+                    final liked = _optimisticLiked ?? serverLiked;
+                    
+                    // Sync optimistic state when server confirms
+                    if (_optimisticLiked != null && snap.hasData && _optimisticLiked == serverLiked) {
+                      // Server caught up, clear optimistic state
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) {
+                          setState(() {
+                            _optimisticLiked = null;
+                            _optimisticLikeCount = null;
+                          });
+                        }
+                      });
+                    }
+                    
                     return IconButton(
                       tooltip: liked ? 'Unlike' : 'Like',
-                      onPressed: () => runAsyncAction(
-                        context,
-                        () => posts.toggleLike(postId: post.id, uid: currentUid),
+                      onPressed: () => _handleLikeTap(liked),
+                      icon: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        transitionBuilder: (child, animation) {
+                          return ScaleTransition(scale: animation, child: child);
+                        },
+                        child: Icon(
+                          liked ? Icons.favorite : Icons.favorite_border,
+                          key: ValueKey(liked),
+                        ),
                       ),
-                      icon: Icon(liked ? Icons.favorite : Icons.favorite_border),
                       color: liked ? Colors.red : null,
                     );
                   },
                 ),
-                Text('${post.likeCount}'),
+                // Use optimistic count if available
+                Text('${_optimisticLikeCount ?? widget.post.likeCount}'),
                 const SizedBox(width: 8),
                 IconButton(
                   tooltip: 'Comments',
                   onPressed: () => _showCommentsSheet(context),
                   icon: const Icon(Icons.chat_bubble_outline),
                 ),
-                Text('${post.commentCount}'),
+                Text('${widget.post.commentCount}'),
                 const Spacer(),
                 IconButton(
                   tooltip: 'Report',
@@ -139,9 +220,9 @@ class PostCard extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _CommentsSheet(
-        post: post,
-        currentUid: currentUid,
-        posts: posts,
+        post: widget.post,
+        currentUid: widget.currentUid,
+        posts: widget.posts,
       ),
     );
   }
@@ -182,9 +263,9 @@ class PostCard extends StatelessWidget {
                 fireAndForget(
                   runAsyncAction(
                     context,
-                    () => posts.reportPost(
-                      postId: post.id,
-                      reportedByUid: currentUid,
+                    () => widget.posts.reportPost(
+                      postId: widget.post.id,
+                      reportedByUid: widget.currentUid,
                       reason: selected,
                       details: details.text.trim().isEmpty ? null : details.text.trim(),
                     ),
@@ -324,7 +405,12 @@ class _CommentsSheetState extends State<_CommentsSheet> {
               stream: widget.posts.commentsStream(postId: widget.post.id),
               builder: (context, snap) {
                 if (!snap.hasData) {
-                  return const Center(child: CircularProgressIndicator());
+                  // Skeleton loading for comments
+                  return ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    itemCount: 4,
+                    itemBuilder: (context, index) => const CommentSkeleton(),
+                  );
                 }
 
                 final comments = snap.data!;

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
 import '../onboarding/nitj_email.dart';
+import 'otp_verification_dialog.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key, required this.controller});
@@ -104,7 +105,30 @@ class _SignupPageState extends State<SignupPage>
 
   Future<void> _nextFromAccount() async {
     if (!_accountFormKey.currentState!.validate()) return;
-    setState(() => _currentStep = 1);
+
+    // Show OTP verification dialog to verify email
+    final email = _emailController.text.trim();
+    final verified = await showOtpVerificationDialog(
+      context: context,
+      email: email,
+    );
+
+    if (!verified) {
+      // User cancelled or OTP verification failed
+      if (mounted) {
+        setState(() {
+          _error = 'Email verification is required to continue.';
+        });
+      }
+      return;
+    }
+
+    // Email verified, proceed to profile step
+    if (!mounted) return;
+    setState(() {
+      _error = null;
+      _currentStep = 1;
+    });
     await _pageController.nextPage(
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeOutCubic,

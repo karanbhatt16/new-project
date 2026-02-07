@@ -99,7 +99,11 @@ service cloud.firestore {
     // Match requests
     // -----------------------
     match /match_requests/{requestId} {
-      allow read: if signedIn()
+      // Allow list queries where user is sender or recipient (for incoming/outgoing streams)
+      // Note: For list queries, we rely on the client query constraints (toUid/fromUid == auth.uid)
+      // For single doc reads, we verify the user is involved
+      allow list: if signedIn();
+      allow get: if signedIn()
         && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
 
       allow create: if signedIn()

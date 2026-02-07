@@ -23,7 +23,7 @@ class CloudinaryUploadResult {
 
 /// Minimal Cloudinary unsigned uploader.
 ///
-/// Uses: POST https://api.cloudinary.com/v1_1/{cloudName}/image/upload
+/// Uses: POST https://api.cloudinary.com/v1_1/{cloudName}/{resourceType}/upload
 /// Fields: upload_preset, file
 class CloudinaryUploader {
   CloudinaryUploader({
@@ -36,22 +36,48 @@ class CloudinaryUploader {
   final String unsignedUploadPreset;
   final http.Client _client;
 
-  Uri get _uploadUri => Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
+  Uri _uploadUri(String resourceType) => 
+      Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/$resourceType/upload');
 
   Future<CloudinaryUploadResult> uploadImageBytes({
     required Uint8List bytes,
     required String filename,
     String? folder,
-    String? resourceType,
   }) async {
-    final req = http.MultipartRequest('POST', _uploadUri);
+    return _uploadBytes(
+      bytes: bytes,
+      filename: filename,
+      folder: folder,
+      resourceType: 'image',
+    );
+  }
+
+  /// Uploads audio/video bytes to Cloudinary.
+  /// 
+  /// Use resourceType 'video' for audio files (Cloudinary treats audio as video).
+  Future<CloudinaryUploadResult> uploadAudioBytes({
+    required Uint8List bytes,
+    required String filename,
+    String? folder,
+  }) async {
+    return _uploadBytes(
+      bytes: bytes,
+      filename: filename,
+      folder: folder,
+      resourceType: 'video', // Cloudinary uses 'video' for audio files
+    );
+  }
+
+  Future<CloudinaryUploadResult> _uploadBytes({
+    required Uint8List bytes,
+    required String filename,
+    required String resourceType,
+    String? folder,
+  }) async {
+    final req = http.MultipartRequest('POST', _uploadUri(resourceType));
     req.fields['upload_preset'] = unsignedUploadPreset;
     if (folder != null && folder.trim().isNotEmpty) {
       req.fields['folder'] = folder.trim();
-    }
-    if (resourceType != null && resourceType.trim().isNotEmpty) {
-      // Cloudinary defaults to image; allow override for future.
-      req.fields['resource_type'] = resourceType.trim();
     }
 
     req.files.add(

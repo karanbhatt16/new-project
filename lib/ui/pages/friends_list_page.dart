@@ -34,6 +34,14 @@ class _FriendsListPageState extends State<FriendsListPage> {
     super.dispose();
   }
 
+  /// Check if two users are opposite gender (male<->female only)
+  bool _isOppositeGender(Gender? myGender, Gender? theirGender) {
+    if (myGender == Gender.male) return theirGender == Gender.female;
+    if (myGender == Gender.female) return theirGender == Gender.male;
+    // For non-binary or prefer not to say, don't allow match requests
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -42,79 +50,89 @@ class _FriendsListPageState extends State<FriendsListPage> {
       appBar: AppBar(
         title: const Text('Friends'),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-            child: TextField(
-              controller: _search,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText: 'Search friends…',
-                border: OutlineInputBorder(),
+      body: StreamBuilder<AppUser?>(
+        stream: widget.auth.profileStreamByUid(widget.signedInUid),
+        builder: (context, currentUserSnap) {
+          final currentUser = currentUserSnap.data;
+          
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                child: TextField(
+                  controller: _search,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'Search friends…',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
               ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
-          Expanded(
-            child: StreamBuilder<Set<String>>(
-              stream: widget.social.friendsStream(uid: widget.signedInUid),
-              builder: (context, snap) {
-                if (snap.hasError) {
-                  return AsyncErrorView(error: snap.error!);
-                }
-                if (!snap.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final uids = snap.data!.toList(growable: false);
-                if (uids.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No friends yet.',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  );
-                }
-
-                return FutureBuilder<List<AppUser>>(
-                  future: widget.auth.publicProfilesByUids(uids),
-                  builder: (context, usersSnap) {
-                    if (usersSnap.hasError) {
-                      return AsyncErrorView(error: usersSnap.error!);
+              Expanded(
+                child: StreamBuilder<Set<String>>(
+                  stream: widget.social.friendsStream(uid: widget.signedInUid),
+                  builder: (context, snap) {
+                    if (snap.hasError) {
+                      return AsyncErrorView(error: snap.error!);
                     }
-                    if (!usersSnap.hasData) {
+                    if (!snap.hasData) {
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    final q = _search.text.trim().toLowerCase();
-                    var users = usersSnap.data!;
-                    users.sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
-
-                    if (q.isNotEmpty) {
-                      users = users.where((u) => u.username.toLowerCase().contains(q)).toList(growable: false);
+                    final uids = snap.data!.toList(growable: false);
+                    if (uids.isEmpty) {
+                      return Center(
+                        child: Text(
+                          'No friends yet.',
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                      );
                     }
 
-                    return ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      itemCount: users.length,
-                      separatorBuilder: (context, index) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final u = users[index];
-                        return _FriendTile(
-                          friend: u,
-                          currentUserUid: widget.signedInUid,
-                          social: widget.social,
-                          auth: widget.auth,
+                    return FutureBuilder<List<AppUser>>(
+                      future: widget.auth.publicProfilesByUids(uids),
+                      builder: (context, usersSnap) {
+                        if (usersSnap.hasError) {
+                          return AsyncErrorView(error: usersSnap.error!);
+                        }
+                        if (!usersSnap.hasData) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+
+                        final q = _search.text.trim().toLowerCase();
+                        var users = usersSnap.data!;
+                        users.sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
+
+                        if (q.isNotEmpty) {
+                          users = users.where((u) => u.username.toLowerCase().contains(q)).toList(growable: false);
+                        }
+
+                        return ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                          itemCount: users.length,
+                          separatorBuilder: (context, index) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final u = users[index];
+                            final canMatch = currentUser != null && 
+                                _isOppositeGender(currentUser.gender, u.gender);
+                            return _FriendTile(
+                              friend: u,
+                              currentUserUid: widget.signedInUid,
+                              social: widget.social,
+                              auth: widget.auth,
+                              canMatch: canMatch,
+                            );
+                          },
                         );
                       },
                     );
                   },
-                );
-              },
-            ),
-          ),
-        ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -127,12 +145,14 @@ class _FriendTile extends StatelessWidget {
     required this.currentUserUid,
     required this.social,
     required this.auth,
+    required this.canMatch,
   });
 
   final AppUser friend;
   final String currentUserUid;
   final FirestoreSocialGraphController social;
   final FirebaseAuthController auth;
+  final bool canMatch;
 
   @override
   Widget build(BuildContext context) {
@@ -144,13 +164,16 @@ class _FriendTile extends StatelessWidget {
         child: friend.profileImageBytes == null ? const Icon(Icons.person) : null,
       ),
       title: Text(friend.username, style: const TextStyle(fontWeight: FontWeight.w700)),
-      subtitle: Text(friend.email, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: _MatchActionIcon(
-        friendUid: friend.uid,
-        friendUsername: friend.username,
-        currentUserUid: currentUserUid,
-        social: social,
-      ),
+      subtitle: null,
+      // Only show match button for opposite gender friends
+      trailing: canMatch
+          ? _MatchActionIcon(
+              friendUid: friend.uid,
+              friendUsername: friend.username,
+              currentUserUid: currentUserUid,
+              social: social,
+            )
+          : null,
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => UserProfilePage(

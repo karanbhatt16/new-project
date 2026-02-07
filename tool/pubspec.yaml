@@ -1,0 +1,8 @@
+name: vibeu_tools
+description: Tools for generating assets
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  image: ^4.3.0

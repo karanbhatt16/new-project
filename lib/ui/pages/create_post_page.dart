@@ -49,6 +49,15 @@ class _CreatePostPageState extends State<CreatePostPage> {
     });
   }
 
+  void _removeImage() {
+    setState(() {
+      _image = null;
+      _ext = 'jpg';
+    });
+  }
+
+  bool get _canPost => _caption.text.trim().isNotEmpty || _image != null;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -58,55 +67,83 @@ class _CreatePostPageState extends State<CreatePostPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          GestureDetector(
-            onTap: _pickImage,
-            child: Container(
-              height: 220,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: theme.colorScheme.outlineVariant),
-              ),
-              child: _image == null
-                  ? const Center(child: Text('Tap to pick an image'))
-                  : ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: Image.memory(_image!, fit: BoxFit.cover),
-                    ),
-            ),
-          ),
-          const SizedBox(height: 12),
+          // Text input first (like Reddit)
           TextField(
             controller: _caption,
-            maxLines: 4,
+            maxLines: 6,
+            onChanged: (_) => setState(() {}), // Rebuild to update button state
             decoration: const InputDecoration(
-              labelText: 'Caption',
+              hintText: "What's on your mind?",
               border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          // Image section
+          if (_image == null)
+            OutlinedButton.icon(
+              onPressed: _pickImage,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: const Text('Add Image (optional)'),
+            )
+          else
+            Stack(
+              children: [
+                GestureDetector(
+                  onTap: _pickImage,
+                  child: Container(
+                    height: 220,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: theme.colorScheme.outlineVariant),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Image.memory(_image!, fit: BoxFit.cover),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: IconButton.filled(
+                    onPressed: _removeImage,
+                    icon: const Icon(Icons.close),
+                    style: IconButton.styleFrom(
+                      backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.8),
+                      foregroundColor: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: () async {
-              if (_image == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please select an image first.')),
-                );
-                return;
-              }
-
-              await runAsyncAction(context, () async {
-                await widget.posts.createPost(
-                  createdByUid: widget.currentUid,
-                  caption: _caption.text,
-                  imageBytes: _image!,
-                  imageExtension: _ext,
-                );
-                if (!context.mounted) return;
-                Navigator.of(context).pop();
-              });
-            },
-            icon: const Icon(Icons.upload),
+            onPressed: _canPost
+                ? () async {
+                    await runAsyncAction(context, () async {
+                      await widget.posts.createPost(
+                        createdByUid: widget.currentUid,
+                        caption: _caption.text,
+                        imageBytes: _image,
+                        imageExtension: _ext,
+                      );
+                      if (!context.mounted) return;
+                      Navigator.of(context).pop();
+                    });
+                  }
+                : null,
+            icon: const Icon(Icons.send),
             label: const Text('Post'),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Add some text, an image, or both!',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),

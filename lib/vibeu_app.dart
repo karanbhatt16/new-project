@@ -4,6 +4,7 @@ import 'auth/auth_gate.dart';
 import 'auth/firebase_auth_controller.dart';
 import 'social/firestore_social_graph_controller.dart';
 import 'chat/firestore_chat_controller.dart';
+import 'chat/e2ee_chat_controller.dart';
 import 'notifications/firestore_notifications_controller.dart';
 import 'posts/firestore_posts_controller.dart';
 
@@ -17,6 +18,7 @@ class VibeUApp extends StatefulWidget {
 class _VibeUAppState extends State<VibeUApp> {
   final _auth = FirebaseAuthController();
   late final _chat = FirestoreChatController(auth: _auth);
+  late final _e2eeChat = E2eeChatController(auth: _auth, chat: _chat);
   late final _social = FirestoreSocialGraphController(chat: _chat);
   final _notifications = FirestoreNotificationsController();
   final _posts = FirestorePostsController();
@@ -382,7 +384,7 @@ class _VibeUAppState extends State<VibeUApp> {
       theme: baseTheme(light),
       darkTheme: baseTheme(dark),
       themeMode: ThemeMode.system,
-      home: AuthGate(controller: _auth, social: _social, chat: _chat, notifications: _notifications, posts: _posts),
+      home: AuthGate(controller: _auth, social: _social, chat: _chat, e2eeChat: _e2eeChat, notifications: _notifications, posts: _posts),
     );
   }
 }

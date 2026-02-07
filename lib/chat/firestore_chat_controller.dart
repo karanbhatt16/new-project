@@ -249,6 +249,107 @@ class FirestoreChatController extends ChangeNotifier {
     return msgDoc.id;
   }
 
+  /// Sends an end-to-end encrypted message.
+  ///
+  /// The message content is encrypted before being stored in Firestore.
+  /// Only the sender and recipient can decrypt the message.
+  Future<String> sendEncryptedMessage({
+    required String threadId,
+    required String fromUid,
+    required String toUid,
+    required String ciphertextB64,
+    required String nonceB64,
+    required String macB64,
+    String? replyToMessageId,
+    String? replyToFromUid,
+    String? replyToTextEncrypted,
+  }) async {
+    final now = DateTime.now();
+    final msgDoc = _db.collection('threads').doc(threadId).collection('messages').doc();
+    await msgDoc.set({
+      'fromUid': fromUid,
+      'toUid': toUid,
+      'ciphertextB64': ciphertextB64,
+      'nonceB64': nonceB64,
+      'macB64': macB64,
+      'sentAt': FieldValue.serverTimestamp(),
+      'sentAtLocal': Timestamp.fromDate(now),
+      'replyToMessageId': replyToMessageId,
+      'replyToFromUid': replyToFromUid,
+      'replyToTextEncrypted': replyToTextEncrypted,
+    });
+
+    await _db.collection('threads').doc(threadId).set({
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    // Best-effort notification
+    try {
+      await _notifications.create(
+        toUid: toUid,
+        fromUid: fromUid,
+        type: NotificationType.message,
+        threadId: threadId,
+      );
+    } catch (e) {
+      print('Failed to create message notification: $e');
+    }
+
+    return msgDoc.id;
+  }
+
+  /// Sends an end-to-end encrypted voice message.
+  ///
+  /// The voice URL is encrypted before being stored in Firestore.
+  Future<String> sendEncryptedVoiceMessage({
+    required String threadId,
+    required String fromUid,
+    required String toUid,
+    required String voiceUrlCiphertextB64,
+    required String voiceUrlNonceB64,
+    required String voiceUrlMacB64,
+    required int durationSeconds,
+    String? replyToMessageId,
+    String? replyToFromUid,
+    String? replyToTextEncrypted,
+  }) async {
+    final now = DateTime.now();
+    final msgDoc = _db.collection('threads').doc(threadId).collection('messages').doc();
+
+    await msgDoc.set({
+      'fromUid': fromUid,
+      'toUid': toUid,
+      'messageType': 'voice',
+      'voiceUrlCiphertextB64': voiceUrlCiphertextB64,
+      'voiceUrlNonceB64': voiceUrlNonceB64,
+      'voiceUrlMacB64': voiceUrlMacB64,
+      'voiceDurationSeconds': durationSeconds,
+      'sentAt': FieldValue.serverTimestamp(),
+      'sentAtLocal': Timestamp.fromDate(now),
+      'replyToMessageId': replyToMessageId,
+      'replyToFromUid': replyToFromUid,
+      'replyToTextEncrypted': replyToTextEncrypted,
+    });
+
+    await _db.collection('threads').doc(threadId).set({
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    // Best-effort notification
+    try {
+      await _notifications.create(
+        toUid: toUid,
+        fromUid: fromUid,
+        type: NotificationType.message,
+        threadId: threadId,
+      );
+    } catch (e) {
+      print('Failed to create voice message notification: $e');
+    }
+
+    return msgDoc.id;
+  }
+
   /// Toggles a reaction on a message.
   /// 
   /// WhatsApp-style: Each user can only have ONE reaction per message.
@@ -313,9 +414,19 @@ class FirestoreChatController extends ChangeNotifier {
     if (message.isCallMessage) {
       return _getCallDisplayText(message);
     }
+    if (message.isVoiceMessage) {
+      return _getVoiceDisplayText(message);
+    }
     if (message.text != null) return message.text!;
     if (message.ciphertextB64 != null) return '[Encrypted message]';
     return '[Unsupported message]';
+  }
+
+  String _getVoiceDisplayText(FirestoreMessage message) {
+    final duration = message.voiceDurationSeconds ?? 0;
+    final minutes = duration ~/ 60;
+    final seconds = duration % 60;
+    return '🎤 Voice message · $minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   String _getCallDisplayText(FirestoreMessage message) {
@@ -461,6 +572,56 @@ class FirestoreChatController extends ChangeNotifier {
     return msgDoc.id;
   }
 
+  /// Sends a voice message to the chat.
+  ///
+  /// The audio file should already be uploaded to Cloudinary or Firebase Storage,
+  /// and the URL passed here.
+  Future<String> sendVoiceMessage({
+    required String threadId,
+    required String fromUid,
+    required String toUid,
+    required String voiceUrl,
+    required int durationSeconds,
+    String? replyToMessageId,
+    String? replyToFromUid,
+    String? replyToText,
+  }) async {
+    final now = DateTime.now();
+    final msgDoc = _db.collection('threads').doc(threadId).collection('messages').doc();
+    
+    await msgDoc.set({
+      'fromUid': fromUid,
+      'toUid': toUid,
+      'messageType': 'voice',
+      'voiceUrl': voiceUrl,
+      'voiceDurationSeconds': durationSeconds,
+      'sentAt': FieldValue.serverTimestamp(),
+      'sentAtLocal': Timestamp.fromDate(now),
+      'replyToMessageId': replyToMessageId,
+      'replyToFromUid': replyToFromUid,
+      'replyToText': replyToText,
+    });
+
+    await _db.collection('threads').doc(threadId).set({
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    // Best-effort notification
+    try {
+      await _notifications.create(
+        toUid: toUid,
+        fromUid: fromUid,
+        type: NotificationType.message,
+        threadId: threadId,
+      );
+    } catch (e) {
+      // ignore
+      print('Failed to create voice message notification: $e');
+    }
+
+    return msgDoc.id;
+  }
+
   /// Stream that emits true if there are any unread messages across all threads for this user.
   /// 
   /// A message is considered unread if:
@@ -500,14 +661,43 @@ class FirestoreChatController extends ChangeNotifier {
   /// Counts messages sent TO the current user that haven't been read.
   /// Uses includeMetadataChanges to show cached data immediately when offline.
   Stream<int> unreadCountStream({required String threadId, required String myUid}) {
+    // Query messages sent to me that are not yet read
+    // Messages without 'read' field are considered unread
     return _db
         .collection('threads')
         .doc(threadId)
         .collection('messages')
         .where('toUid', isEqualTo: myUid)
-        .where('read', isEqualTo: false)
         .snapshots(includeMetadataChanges: true)
-        .map((snap) => snap.docs.length);
+        .map((snap) => snap.docs.where((doc) {
+          final data = doc.data();
+          // Message is unread if 'read' field doesn't exist or is false
+          return data['read'] != true;
+        }).length);
+  }
+
+  /// Marks all messages in a thread as read for the current user.
+  /// 
+  /// Call this when the user opens a chat thread.
+  Future<void> markThreadAsRead({required String threadId, required String myUid}) async {
+    final unreadMessages = await _db
+        .collection('threads')
+        .doc(threadId)
+        .collection('messages')
+        .where('toUid', isEqualTo: myUid)
+        .get();
+
+    if (unreadMessages.docs.isEmpty) return;
+
+    final batch = _db.batch();
+    for (final doc in unreadMessages.docs) {
+      final data = doc.data();
+      // Only update if not already read
+      if (data['read'] != true) {
+        batch.update(doc.reference, {'read': true});
+      }
+    }
+    await batch.commit();
   }
 
   /// Get a thread by ID, preferring cache for instant loading.

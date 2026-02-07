@@ -9,6 +9,7 @@ import '../../notifications/notification_models.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_action.dart';
 import '../widgets/async_error_view.dart';
+import '../widgets/skeleton_widgets.dart';
 import 'user_profile_page.dart';
 
 class NotificationsPage extends StatelessWidget {
@@ -47,7 +48,14 @@ class NotificationsPage extends StatelessWidget {
             return AsyncErrorView(error: snap.error!);
           }
           if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator());
+            return ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: 6,
+              itemBuilder: (context, index) => const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: NotificationSkeleton(),
+              ),
+            );
           }
 
           final items = snap.data!;

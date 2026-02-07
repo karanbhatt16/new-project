@@ -4,10 +4,12 @@ import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
 import '../../call/voice_call_controller.dart';
 import '../../chat/firestore_chat_controller.dart';
+import '../../chat/e2ee_chat_controller.dart';
 import '../../chat/firestore_chat_models.dart' show FirestoreChatThread, FirestoreMessage;
 import '../../notifications/firestore_notifications_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_action.dart';
+import '../widgets/skeleton_widgets.dart';
 import '_messages_widgets.dart';
 import 'chat_thread_page.dart';
 
@@ -19,6 +21,7 @@ class MessagesPage extends StatefulWidget {
     required this.auth,
     required this.social,
     required this.chat,
+    required this.e2eeChat,
     required this.notifications,
     required this.callController,
   });
@@ -28,6 +31,7 @@ class MessagesPage extends StatefulWidget {
   final FirebaseAuthController auth;
   final FirestoreSocialGraphController social;
   final FirestoreChatController chat;
+  final E2eeChatController e2eeChat;
   final FirestoreNotificationsController notifications;
   final VoiceCallController callController;
 
@@ -45,29 +49,41 @@ class _MessagesPageState extends State<MessagesPage> {
   }
 
   Future<void> _openChatWith({required AppUser current, required AppUser other, bool isMatchChat = false}) async {
-    final thread = await widget.chat.getOrCreateThread(
-      myUid: current.uid,
-      myEmail: current.email,
-      otherUid: other.uid,
-      otherEmail: other.email,
-    );
+    try {
+      final thread = await widget.chat.getOrCreateThread(
+        myUid: current.uid,
+        myEmail: current.email,
+        otherUid: other.uid,
+        otherEmail: other.email,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChatThreadPage(
-          currentUser: current,
-          otherUser: other,
-          thread: thread,
-          chat: widget.chat,
-          social: widget.social,
-          notifications: widget.notifications,
-          callController: widget.callController,
-          isMatchChat: isMatchChat,
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChatThreadPage(
+            currentUser: current,
+            otherUser: other,
+            thread: thread,
+            chat: widget.chat,
+            e2eeChat: widget.e2eeChat,
+            social: widget.social,
+            notifications: widget.notifications,
+            callController: widget.callController,
+            isMatchChat: isMatchChat,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      debugPrint('Error opening chat: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open chat: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -77,7 +93,7 @@ class _MessagesPageState extends State<MessagesPage> {
       builder: (context, userSnap) {
         final currentUser = userSnap.data;
         if (currentUser == null) {
-          return const Center(child: CircularProgressIndicator());
+          return _buildPageSkeleton(context);
         }
 
         return StreamBuilder<Set<String>>(
@@ -85,7 +101,7 @@ class _MessagesPageState extends State<MessagesPage> {
           builder: (context, friendsSnap) {
             final friendUids = friendsSnap.data;
             if (friendUids == null) {
-              return const Center(child: CircularProgressIndicator());
+              return _buildPageSkeleton(context);
             }
 
             return StreamBuilder<List<AppUser>>(
@@ -93,7 +109,7 @@ class _MessagesPageState extends State<MessagesPage> {
               builder: (context, allSnap) {
                 final allUsers = allSnap.data;
                 if (allUsers == null) {
-                  return const Center(child: CircularProgressIndicator());
+                  return _buildPageSkeleton(context);
                 }
 
                 final friends = allUsers.where((u) => friendUids.contains(u.uid)).toList(growable: false);
@@ -297,6 +313,7 @@ class _MessagesPageState extends State<MessagesPage> {
                                                 otherUser: matchUser,
                                                 thread: thread,
                                                 chat: widget.chat,
+                                                e2eeChat: widget.e2eeChat,
                                                 social: widget.social,
                                                 notifications: widget.notifications,
                                                 callController: widget.callController,
@@ -329,9 +346,10 @@ class _MessagesPageState extends State<MessagesPage> {
 
                               final threads = threadSnap.data;
                               if (threads == null) {
-                                return const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 24),
-                                  child: Center(child: CircularProgressIndicator()),
+                                return Column(
+                                  children: [
+                                    for (int i = 0; i < 4; i++) const ConversationTileSkeleton(),
+                                  ],
                                 );
                               }
 
@@ -359,9 +377,6 @@ class _MessagesPageState extends State<MessagesPage> {
                                           stream: widget.chat.lastMessageStream(threadId: t.id),
                                           builder: (context, msgSnap) {
                                             final lastMsg = msgSnap.data;
-                                            final lastMessageText = lastMsg != null 
-                                                ? widget.chat.displayText(lastMsg) 
-                                                : null;
 
                                             return StreamBuilder<int>(
                                               stream: widget.chat.unreadCountStream(
@@ -371,9 +386,11 @@ class _MessagesPageState extends State<MessagesPage> {
                                               builder: (context, unreadSnap) {
                                                 final unreadCount = unreadSnap.data ?? 0;
 
-                                                return ConversationTile(
+                                                return _DecryptedConversationTile(
                                                   otherUser: other,
-                                                  lastMessageText: lastMessageText,
+                                                  lastMessage: lastMsg,
+                                                  e2eeChat: widget.e2eeChat,
+                                                  chat: widget.chat,
                                                   unread: unreadCount,
                                                   onTap: () => _openChatWith(current: currentUser, other: other),
                                                 );
@@ -432,14 +449,6 @@ class _MessagesPageState extends State<MessagesPage> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        subtitle: Text(
-          user.email,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
         trailing: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
@@ -456,8 +465,166 @@ class _MessagesPageState extends State<MessagesPage> {
       ),
     );
   }
+
+  Widget _buildPageSkeleton(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      color: theme.colorScheme.surface,
+      child: Column(
+        children: [
+          // Search bar skeleton
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Shimmer(
+              child: Container(
+                height: 52,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+              children: [
+                // Section header skeleton
+                Shimmer(
+                  child: Row(
+                    children: [
+                      SkeletonBox(width: 140, height: 18, borderRadius: 9),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Conversation skeletons
+                for (int i = 0; i < 5; i++) const ConversationTileSkeleton(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 extension _FirstOrNull<E> on Iterable<E> {
   E? get firstOrNull => isEmpty ? null : first;
+}
+
+/// A conversation tile that handles async decryption of the last message.
+class _DecryptedConversationTile extends StatefulWidget {
+  const _DecryptedConversationTile({
+    required this.otherUser,
+    required this.lastMessage,
+    required this.e2eeChat,
+    required this.chat,
+    required this.unread,
+    required this.onTap,
+  });
+
+  final AppUser otherUser;
+  final FirestoreMessage? lastMessage;
+  final E2eeChatController e2eeChat;
+  final FirestoreChatController chat;
+  final int unread;
+  final VoidCallback onTap;
+
+  @override
+  State<_DecryptedConversationTile> createState() => _DecryptedConversationTileState();
+}
+
+class _DecryptedConversationTileState extends State<_DecryptedConversationTile> {
+  String? _decryptedText;
+  String? _lastMessageId;
+  bool _isDecrypting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _decryptIfNeeded();
+  }
+
+  @override
+  void didUpdateWidget(_DecryptedConversationTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If the message changed, decrypt again
+    if (widget.lastMessage?.id != _lastMessageId) {
+      _decryptIfNeeded();
+    }
+  }
+
+  Future<void> _decryptIfNeeded() async {
+    final msg = widget.lastMessage;
+    if (msg == null) {
+      if (mounted) {
+        setState(() {
+          _decryptedText = null;
+          _lastMessageId = null;
+        });
+      }
+      return;
+    }
+
+    // Avoid duplicate decryption
+    if (msg.id == _lastMessageId && _decryptedText != null) {
+      return;
+    }
+
+    _lastMessageId = msg.id;
+
+    // If it's a plaintext message, call/voice message, or deleted, use sync display
+    if (msg.text != null || msg.isCallMessage || msg.isVoiceMessage || msg.deletedForEveryone) {
+      if (mounted) {
+        setState(() {
+          _decryptedText = widget.chat.displayText(msg);
+        });
+      }
+      return;
+    }
+
+    // If it's encrypted, decrypt asynchronously
+    if (msg.ciphertextB64 != null) {
+      if (_isDecrypting) return; // Already decrypting
+      
+      _isDecrypting = true;
+      
+      try {
+        final decrypted = await widget.e2eeChat.decryptMessage(msg);
+        if (mounted && msg.id == _lastMessageId) {
+          setState(() {
+            _decryptedText = decrypted ?? '[Encrypted message]';
+          });
+        }
+      } finally {
+        _isDecrypting = false;
+      }
+    } else {
+      if (mounted) {
+        setState(() {
+          _decryptedText = widget.chat.displayText(msg);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    String? displayText = _decryptedText;
+    
+    // Show a subtle loading indicator while decrypting
+    if (widget.lastMessage != null && displayText == null) {
+      displayText = '...';
+    }
+
+    return ConversationTile(
+      otherUser: widget.otherUser,
+      lastMessageText: displayText,
+      unread: widget.unread,
+      onTap: widget.onTap,
+    );
+  }
 }

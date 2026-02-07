@@ -50,28 +50,44 @@ class FirestorePostsController {
         .map((snap) => snap.docs.map(Post.fromDoc).toList(growable: false));
   }
 
+  /// Creates a post with optional text and/or image.
+  /// At least one of [caption] or [imageBytes] must be provided.
   Future<String> createPost({
     required String createdByUid,
-    required String caption,
-    required Uint8List imageBytes,
-    required String imageExtension,
+    String caption = '',
+    Uint8List? imageBytes,
+    String imageExtension = 'jpg',
   }) async {
+    final trimmedCaption = caption.trim();
+    
+    // Validate: at least one of caption or image must be provided
+    if (trimmedCaption.isEmpty && imageBytes == null) {
+      throw ArgumentError('Post must have either text or an image');
+    }
+
     final postRef = _db.collection('posts').doc();
     final postId = postRef.id;
 
-    // Upload to Cloudinary (unsigned preset).
-    final upload = await _cloudinary.uploadImageBytes(
-      bytes: imageBytes,
-      filename: 'post_$postId.${imageExtension.toLowerCase()}',
-      folder: 'posts',
-    );
+    String? imageUrl;
+    String? imagePublicId;
+
+    // Upload to Cloudinary only if image is provided.
+    if (imageBytes != null) {
+      final upload = await _cloudinary.uploadImageBytes(
+        bytes: imageBytes,
+        filename: 'post_$postId.${imageExtension.toLowerCase()}',
+        folder: 'posts',
+      );
+      imageUrl = upload.secureUrl;
+      imagePublicId = upload.publicId;
+    }
 
     await postRef.set({
       'createdByUid': createdByUid,
-      'caption': caption.trim(),
-      'imageUrl': upload.secureUrl,
-      'imagePublicId': upload.publicId,
-      'imageProvider': 'CLOUDINARY',
+      'caption': trimmedCaption,
+      if (imageUrl != null) 'imageUrl': imageUrl,
+      if (imagePublicId != null) 'imagePublicId': imagePublicId,
+      if (imageBytes != null) 'imageProvider': 'CLOUDINARY',
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
       'status': 'PUBLISHED',

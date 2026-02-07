@@ -66,7 +66,6 @@ class FriendRequestsPage extends StatelessWidget {
                           child: ListTile(
                             leading: const CircleAvatar(child: Icon(Icons.person)),
                             title: Text(u?.username ?? r.fromUid),
-                            subtitle: Text(u?.email ?? ''),
                             trailing: Wrap(
                               spacing: 8,
                               children: [
@@ -124,7 +123,6 @@ class FriendRequestsPage extends StatelessWidget {
                           child: ListTile(
                             leading: const CircleAvatar(child: Icon(Icons.person)),
                             title: Text(u?.username ?? r.toUid),
-                            subtitle: Text(u?.email ?? ''),
                             trailing: OutlinedButton(
                               onPressed: () async => runAsyncAction(
                                 context,

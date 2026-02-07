@@ -43,19 +43,9 @@ class UserProfilePage extends StatelessWidget {
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      user.username,
-                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      user.email,
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
+                child: Text(
+                  user.username,
+                  style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
             ],
@@ -135,12 +125,28 @@ class UserProfilePage extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           // Match Section - visible to everyone
-          _MatchSection(
-            currentUserUid: currentUserUid,
-            profileUser: user,
-            social: social,
-            auth: auth,
-          ),
+          // Need to get current user's gender for opposite-gender match check
+          if (auth != null)
+            StreamBuilder<AppUser?>(
+              stream: auth!.profileStreamByUid(currentUserUid),
+              builder: (context, currentUserSnap) {
+                return _MatchSection(
+                  currentUserUid: currentUserUid,
+                  currentUserGender: currentUserSnap.data?.gender,
+                  profileUser: user,
+                  social: social,
+                  auth: auth,
+                );
+              },
+            )
+          else
+            _MatchSection(
+              currentUserUid: currentUserUid,
+              currentUserGender: null,
+              profileUser: user,
+              social: social,
+              auth: auth,
+            ),
         ],
       ),
     );
@@ -566,15 +572,24 @@ class _AllFriendsPage extends StatelessWidget {
 class _MatchSection extends StatelessWidget {
   const _MatchSection({
     required this.currentUserUid,
+    required this.currentUserGender,
     required this.profileUser,
     required this.social,
     this.auth,
   });
 
   final String currentUserUid;
+  final Gender? currentUserGender;
   final AppUser profileUser;
   final FirestoreSocialGraphController social;
   final FirebaseAuthController? auth;
+
+  /// Check if two users are opposite gender (male<->female only)
+  bool get _isOppositeGender {
+    if (currentUserGender == Gender.male) return profileUser.gender == Gender.female;
+    if (currentUserGender == Gender.female) return profileUser.gender == Gender.male;
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -699,8 +714,8 @@ class _MatchSection extends StatelessWidget {
               },
             ),
             
-            // Match action button (only for other users' profiles)
-            if (!isOwnProfile) ...[
+            // Match action button (only for other users' profiles AND opposite gender)
+            if (!isOwnProfile && _isOppositeGender) ...[
               const SizedBox(height: 12),
               StreamBuilder<MatchStatus>(
                 stream: social.matchStatusStream(myUid: currentUserUid, otherUid: profileUser.uid),

@@ -9,6 +9,7 @@ import '../../social/firestore_social_graph_controller.dart';
 import '../../social/local_filter_preferences.dart';
 import '../../social/local_swipe_store.dart';
 import '../widgets/async_error_view.dart';
+import '../widgets/skeleton_widgets.dart';
 import 'swipe_deck.dart';
 import 'match_requests_page.dart';
 import 'user_profile_page.dart';
@@ -204,6 +205,46 @@ class _SearchDiscoverState extends State<_SearchDiscover> {
     await _loadData(isRefresh: true);
   }
 
+  Widget _buildSearchSkeleton(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    return Column(
+      children: [
+        // Search bar skeleton
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Shimmer(
+            child: Container(
+              height: 56,
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+        ),
+        // Section header skeleton
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Shimmer(
+            child: Row(
+              children: [
+                SkeletonBox(width: 160, height: 18, borderRadius: 9),
+              ],
+            ),
+          ),
+        ),
+        // User cards skeleton
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: 5,
+            itemBuilder: (context, index) => const UserCardSkeleton(),
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Get all unique interests from all users for the filter
   Set<String> _getAllInterests() {
     if (_allUsers == null) return {};
@@ -320,7 +361,7 @@ class _SearchDiscoverState extends State<_SearchDiscover> {
     final theme = Theme.of(context);
 
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return _buildSearchSkeleton(theme);
     }
 
     if (_error != null) {

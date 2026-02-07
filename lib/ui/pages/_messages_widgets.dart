@@ -34,7 +34,7 @@ class UserStartTile extends StatelessWidget {
       child: ListTile(
         leading: UserAvatar(user: user),
         title: Text(user.username, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text(user.email, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: null,
         trailing: const Icon(Icons.chevron_right),
         onTap: onTap,
       ),

@@ -19,6 +19,7 @@ import '../call/voice_call_controller.dart';
 import '../chat/firestore_chat_models.dart' show CallMessageStatus;
 import '../social/firestore_social_graph_controller.dart';
 import '../chat/firestore_chat_controller.dart';
+import '../chat/e2ee_chat_controller.dart';
 import '../notifications/firestore_notifications_controller.dart';
 import '../posts/firestore_posts_controller.dart';
 
@@ -31,6 +32,7 @@ class AppShell extends StatefulWidget {
     required this.auth,
     required this.social,
     required this.chat,
+    required this.e2eeChat,
     required this.notifications,
     required this.posts,
   });
@@ -41,6 +43,7 @@ class AppShell extends StatefulWidget {
   final FirebaseAuthController auth;
   final FirestoreSocialGraphController social;
   final FirestoreChatController chat;
+  final E2eeChatController e2eeChat;
   final FirestoreNotificationsController notifications;
   final FirestorePostsController posts;
 
@@ -561,6 +564,7 @@ class _AppShellState extends State<AppShell> {
           auth: widget.auth,
           social: widget.social,
           chat: widget.chat,
+          e2eeChat: widget.e2eeChat,
           notifications: widget.notifications,
           callController: _callController,
         );

@@ -1,12 +1,20 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/foundation.dart' as foundation;
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 import '../../auth/app_user.dart';
 import '../../call/voice_call_controller.dart';
 import '../../chat/firestore_chat_controller.dart';
+import '../../chat/e2ee_chat_controller.dart';
 import '../../chat/firestore_chat_models.dart' show FirestoreChatThread, FirestoreMessage, CallMessageStatus;
 import '../../notifications/firestore_notifications_controller.dart';
+import '../../posts/cloudinary_uploader.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_action.dart';
 import 'reaction_row.dart';
@@ -20,6 +28,7 @@ class ChatThreadPage extends StatefulWidget {
     required this.otherUser,
     required this.thread,
     required this.chat,
+    required this.e2eeChat,
     required this.social,
     required this.notifications,
     required this.callController,
@@ -30,6 +39,7 @@ class ChatThreadPage extends StatefulWidget {
   final AppUser otherUser;
   final FirestoreChatThread thread;
   final FirestoreChatController chat;
+  final E2eeChatController e2eeChat;
   final FirestoreSocialGraphController social;
   final FirestoreNotificationsController notifications;
   final VoiceCallController callController;
@@ -54,6 +64,35 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
 
   FirestoreMessage? _replyTo;
 
+  /// Get display text for a message.
+  /// Messages are already decrypted by the stream, so this is now simple.
+  String _getDisplayText(FirestoreMessage m) {
+    // Check deleted status first
+    if (m.isDeletedFor(widget.currentUser.uid)) {
+      return 'This message was deleted';
+    }
+    if (m.deletedForEveryone) {
+      return 'This message was deleted';
+    }
+
+    // For call and voice messages, use the sync display
+    if (m.isCallMessage || m.isVoiceMessage) {
+      return widget.chat.displayText(m, forUid: widget.currentUser.uid);
+    }
+
+    // Messages are already decrypted by the stream
+    if (m.text != null) {
+      return m.text!;
+    }
+
+    // If still encrypted (decryption failed), show placeholder
+    if (m.ciphertextB64 != null) {
+      return '[Encrypted message]';
+    }
+
+    return '[Unsupported message]';
+  }
+
   // Selection mode state
   bool _selectionMode = false;
   final Set<String> _selectedMessageIds = {};
@@ -63,14 +102,40 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
   OverlayEntry? _reactionOverlay;
   bool _showingFullEmojiPicker = false;
 
+  // Voice recording state
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  DateTime? _recordingStartTime;
+  Timer? _recordingTimer;
+  int _recordingDurationSeconds = 0;
+  String? _recordingPath;
+
+  // Voice message playback
+  final Map<String, AudioPlayer> _audioPlayers = {};
+  final Map<String, bool> _isPlaying = {};
+  final Map<String, Duration> _playerPositions = {};
+  final Map<String, Duration> _playerDurations = {};
+
+  // Cloudinary uploader for voice messages
+  final CloudinaryUploader _cloudinary = CloudinaryUploader(
+    cloudName: 'dlouee0os',
+    unsignedUploadPreset: 'vibeu_posts',
+  );
+
   @override
   void initState() {
     super.initState();
-    // Mark message notifications for this thread as read when chat is opened
+    // Mark messages and notifications as read when chat is opened
     _markMessagesAsRead();
   }
 
   Future<void> _markMessagesAsRead() async {
+    // Mark the actual messages as read (for unread count badge)
+    await widget.chat.markThreadAsRead(
+      threadId: widget.thread.id,
+      myUid: widget.currentUser.uid,
+    );
+    // Also mark notifications as read
     await widget.notifications.markMessageNotificationsRead(
       uid: widget.currentUser.uid,
       threadId: widget.thread.id,
@@ -82,6 +147,11 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
     _removeReactionOverlay();
     _controller.dispose();
     _focusNode.dispose();
+    _recordingTimer?.cancel();
+    _audioRecorder.dispose();
+    for (final player in _audioPlayers.values) {
+      player.dispose();
+    }
     super.dispose();
   }
   
@@ -286,7 +356,10 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                   ),
                 Expanded(
                   child: StreamBuilder<List<FirestoreMessage>>(
-                    stream: widget.chat.messagesStream(threadId: widget.thread.id),
+                    stream: widget.e2eeChat.decryptedMessagesStream(
+                      threadId: widget.thread.id,
+                      otherUid: widget.otherUser.uid,
+                    ),
                     builder: (context, snap) {
                       final messages = snap.data;
                       if (messages == null) {
@@ -316,7 +389,7 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                           );
                           final isMe = m.fromUid == widget.currentUser.uid;
                           final isDeleted = m.deletedForEveryone; // Only show "deleted" for everyone
-                          final text = widget.chat.displayText(m, forUid: widget.currentUser.uid);
+                          final text = _getDisplayText(m);
                           final isSelected = _selectedMessageIds.contains(m.id);
                           
                           // WhatsApp-like colors: outgoing slightly tinted, incoming neutral.
@@ -329,11 +402,50 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
 
                           // Special rendering for call messages (if not deleted)
                           if (m.isCallMessage && !isDeleted) {
-                            return _buildCallMessageBubble(
-                              context: context,
-                              message: m,
-                              isMe: isMe,
-                              theme: theme,
+                            return GestureDetector(
+                              onTap: _selectionMode
+                                  ? () => _toggleMessageSelection(m.id)
+                                  : null,
+                              onLongPress: () => _enterSelectionMode(m.id),
+                              child: Container(
+                                color: isSelected
+                                    ? theme.colorScheme.primary.withValues(alpha: 0.12)
+                                    : Colors.transparent,
+                                child: _buildCallMessageBubble(
+                                  context: context,
+                                  message: m,
+                                  isMe: isMe,
+                                  theme: theme,
+                                ),
+                              ),
+                            );
+                          }
+
+                          // Special rendering for voice messages (if not deleted)
+                          if (m.isVoiceMessage && !isDeleted) {
+                            return Column(
+                              children: [
+                                if (showDateSeparator)
+                                  _buildDateSeparator(m.sentAt, theme),
+                                GestureDetector(
+                                  onTap: _selectionMode
+                                      ? () => _toggleMessageSelection(m.id)
+                                      : null,
+                                  onLongPress: () => _enterSelectionMode(m.id),
+                                  child: Container(
+                                    color: isSelected
+                                        ? theme.colorScheme.primary.withValues(alpha: 0.12)
+                                        : Colors.transparent,
+                                    child: _buildVoiceMessageBubble(
+                                      context: context,
+                                      message: m,
+                                      isMe: isMe,
+                                      theme: theme,
+                                      isMatch: isMatch,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             );
                           }
 
@@ -543,7 +655,7 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        widget.chat.displayText(_replyTo!),
+                                        _getDisplayText(_replyTo!),
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -557,42 +669,105 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                               ],
                             ),
                           ),
-                        Row(
-                          children: [
-                            IconButton(
-                              onPressed: canChat ? _toggleEmojiPicker : null,
-                              icon: Icon(
-                                _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions_outlined,
+                        if (_isRecording)
+                          // Recording UI
+                          Row(
+                            children: [
+                              IconButton(
+                                onPressed: _cancelRecording,
+                                icon: const Icon(Icons.delete_outline),
+                                color: theme.colorScheme.error,
+                                tooltip: 'Cancel',
                               ),
-                            ),
-                            Expanded(
-                              child: TextField(
-                                controller: _controller,
-                                focusNode: _focusNode,
-                                enabled: canChat,
-                                decoration: const InputDecoration(
-                                  hintText: 'Message…',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
+                                    borderRadius: BorderRadius.circular(24),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.mic,
+                                        color: theme.colorScheme.error,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _formatRecordingDuration(_recordingDurationSeconds),
+                                        style: theme.textTheme.bodyLarge?.copyWith(
+                                          color: theme.colorScheme.error,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        'Recording...',
+                                        style: theme.textTheme.bodyMedium?.copyWith(
+                                          color: theme.colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                minLines: 1,
-                                maxLines: 4,
-                                textInputAction: TextInputAction.send,
-                                onSubmitted: canChat ? (_) => _send() : null,
-                                onTap: () {
-                                  if (_showEmojiPicker) {
-                                    setState(() => _showEmojiPicker = false);
-                                  }
-                                },
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            IconButton.filled(
-                              onPressed: canChat ? _send : null,
-                              icon: const Icon(Icons.send),
-                            ),
-                          ],
-                        ),
+                              const SizedBox(width: 8),
+                              IconButton.filled(
+                                onPressed: _stopAndSendRecording,
+                                icon: const Icon(Icons.send),
+                                style: IconButton.styleFrom(
+                                  backgroundColor: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ],
+                          )
+                        else
+                          // Normal input UI
+                          Row(
+                            children: [
+                              IconButton(
+                                onPressed: canChat ? _toggleEmojiPicker : null,
+                                icon: Icon(
+                                  _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions_outlined,
+                                ),
+                              ),
+                              Expanded(
+                                child: TextField(
+                                  controller: _controller,
+                                  focusNode: _focusNode,
+                                  enabled: canChat,
+                                  decoration: const InputDecoration(
+                                    hintText: 'Message…',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  minLines: 1,
+                                  maxLines: 4,
+                                  textInputAction: TextInputAction.send,
+                                  onSubmitted: canChat ? (_) => _send() : null,
+                                  onTap: () {
+                                    if (_showEmojiPicker) {
+                                      setState(() => _showEmojiPicker = false);
+                                    }
+                                  },
+                                  onChanged: (_) => setState(() {}),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Show mic button when text is empty, send button when text exists
+                              if (_controller.text.trim().isEmpty)
+                                IconButton.filled(
+                                  onPressed: canChat ? _startRecording : null,
+                                  icon: const Icon(Icons.mic),
+                                )
+                              else
+                                IconButton.filled(
+                                  onPressed: canChat ? _send : null,
+                                  icon: const Icon(Icons.send),
+                                ),
+                            ],
+                          ),
                         if (_showEmojiPicker)
                           Container(
                             height: 300,
@@ -674,7 +849,8 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
     if (text.isEmpty) return;
 
     await runAsyncAction(context, () async {
-      await widget.chat.sendMessagePlaintext(
+      // Use E2EE encrypted sending
+      await widget.e2eeChat.sendEncryptedMessage(
         threadId: widget.thread.id,
         fromUid: widget.currentUser.uid,
         fromEmail: widget.currentUser.email,
@@ -690,6 +866,302 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
         _replyTo = null;
       });
     });
+  }
+
+  // Voice recording methods
+  Future<void> _startRecording() async {
+    try {
+      if (await _audioRecorder.hasPermission()) {
+        final dir = await getTemporaryDirectory();
+        final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        
+        await _audioRecorder.start(
+          const RecordConfig(
+            encoder: AudioEncoder.aacLc,
+            bitRate: 128000,
+            sampleRate: 44100,
+          ),
+          path: path,
+        );
+        
+        setState(() {
+          _isRecording = true;
+          _recordingStartTime = DateTime.now();
+          _recordingDurationSeconds = 0;
+          _recordingPath = path;
+        });
+        
+        // Start timer to update duration
+        _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          setState(() {
+            _recordingDurationSeconds = DateTime.now().difference(_recordingStartTime!).inSeconds;
+          });
+        });
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission is required for voice messages')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start recording: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    _recordingTimer?.cancel();
+    await _audioRecorder.stop();
+    
+    // Delete the recorded file
+    if (_recordingPath != null) {
+      try {
+        final file = File(_recordingPath!);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
+    }
+    
+    setState(() {
+      _isRecording = false;
+      _recordingStartTime = null;
+      _recordingDurationSeconds = 0;
+      _recordingPath = null;
+    });
+  }
+
+  Future<void> _stopAndSendRecording() async {
+    _recordingTimer?.cancel();
+    final path = await _audioRecorder.stop();
+    
+    if (path == null || _recordingDurationSeconds < 1) {
+      // Too short, cancel
+      await _cancelRecording();
+      return;
+    }
+
+    final duration = _recordingDurationSeconds;
+    
+    setState(() {
+      _isRecording = false;
+      _recordingStartTime = null;
+      _recordingDurationSeconds = 0;
+      _recordingPath = null;
+    });
+
+    // Upload and send
+    await runAsyncAction(context, () async {
+      final file = File(path);
+      final bytes = await file.readAsBytes();
+      
+      // Upload to Cloudinary
+      final upload = await _cloudinary.uploadAudioBytes(
+        bytes: bytes,
+        filename: 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a',
+        folder: 'voice_messages',
+      );
+      
+      // Send encrypted voice message
+      await widget.e2eeChat.sendEncryptedVoiceMessage(
+        threadId: widget.thread.id,
+        fromUid: widget.currentUser.uid,
+        toUid: widget.otherUser.uid,
+        voiceUrl: upload.secureUrl,
+        durationSeconds: duration,
+        replyToMessageId: _replyTo?.id,
+        replyToFromUid: _replyTo?.fromUid,
+        replyToText: _replyTo == null ? null : widget.chat.displayText(_replyTo!),
+      );
+      
+      // Clean up temp file
+      try {
+        await file.delete();
+      } catch (_) {}
+      
+      setState(() {
+        _replyTo = null;
+      });
+    });
+  }
+
+  String _formatRecordingDuration(int seconds) {
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
+  // Voice playback methods
+  AudioPlayer _getPlayer(String messageId) {
+    return _audioPlayers.putIfAbsent(messageId, () {
+      final player = AudioPlayer();
+      player.onPlayerComplete.listen((_) {
+        setState(() {
+          _isPlaying[messageId] = false;
+          _playerPositions[messageId] = Duration.zero;
+        });
+      });
+      player.onPositionChanged.listen((pos) {
+        setState(() {
+          _playerPositions[messageId] = pos;
+        });
+      });
+      player.onDurationChanged.listen((dur) {
+        setState(() {
+          _playerDurations[messageId] = dur;
+        });
+      });
+      return player;
+    });
+  }
+
+  Future<void> _togglePlayback(String messageId, String url) async {
+    final player = _getPlayer(messageId);
+    final playing = _isPlaying[messageId] ?? false;
+    
+    if (playing) {
+      await player.pause();
+      setState(() => _isPlaying[messageId] = false);
+    } else {
+      // Stop other players
+      for (final entry in _audioPlayers.entries) {
+        if (entry.key != messageId && (_isPlaying[entry.key] ?? false)) {
+          await entry.value.pause();
+          _isPlaying[entry.key] = false;
+        }
+      }
+      
+      await player.play(UrlSource(url));
+      setState(() => _isPlaying[messageId] = true);
+    }
+  }
+
+  Widget _buildVoiceMessageBubble({
+    required BuildContext context,
+    required FirestoreMessage message,
+    required bool isMe,
+    required ThemeData theme,
+    required bool isMatch,
+  }) {
+    final playing = _isPlaying[message.id] ?? false;
+    final position = _playerPositions[message.id] ?? Duration.zero;
+    final duration = _playerDurations[message.id] ?? 
+        Duration(seconds: message.voiceDurationSeconds ?? 0);
+    
+    final progress = duration.inMilliseconds > 0 
+        ? position.inMilliseconds / duration.inMilliseconds 
+        : 0.0;
+
+    final myBubble = isMatch
+        ? theme.colorScheme.secondary.withValues(alpha: 0.22)
+        : theme.colorScheme.primary.withValues(alpha: 0.12);
+    final otherBubble = isMatch
+        ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.70)
+        : theme.colorScheme.surfaceContainerHighest;
+
+    String formatDuration(Duration d) {
+      final m = d.inMinutes;
+      final s = d.inSeconds % 60;
+      return '$m:${s.toString().padLeft(2, '0')}';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * 0.75,
+              minWidth: 200,
+            ),
+            decoration: BoxDecoration(
+              color: isMe ? myBubble : otherBubble,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(18),
+                topRight: const Radius.circular(18),
+                bottomLeft: Radius.circular(isMe ? 18 : 4),
+                bottomRight: Radius.circular(isMe ? 4 : 18),
+              ),
+            ),
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Play/Pause button
+                IconButton(
+                  onPressed: message.voiceUrl != null
+                      ? () => _togglePlayback(message.id, message.voiceUrl!)
+                      : null,
+                  icon: Icon(
+                    playing ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                    size: 40,
+                    color: isMe 
+                        ? theme.colorScheme.primary 
+                        : theme.colorScheme.secondary,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+                const SizedBox(width: 8),
+                // Waveform / progress
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Progress bar
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.1),
+                          valueColor: AlwaysStoppedAnimation(
+                            isMe ? theme.colorScheme.primary : theme.colorScheme.secondary,
+                          ),
+                          minHeight: 4,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      // Duration
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            playing ? formatDuration(position) : formatDuration(duration),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          Text(
+                            _formatTime(message.sentAt),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontSize: 11,
+                              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                // Mic icon indicator
+                Icon(
+                  Icons.mic,
+                  size: 16,
+                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _startVoiceCall(BuildContext context) {
@@ -709,7 +1181,7 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
       _selectionMode = true;
       _selectedMessageIds.add(messageId);
     });
-    // Show reaction picker above the selected message
+    // Show reaction picker for single message selection
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showReactionPickerAboveMessage(messageId);
     });
@@ -748,19 +1220,8 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
         
         return Stack(
           children: [
-            // Dismiss overlay when tapping outside
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: () {
-                  _removeReactionOverlay();
-                  if (!_showingFullEmojiPicker) {
-                    _exitSelectionMode();
-                  }
-                },
-                behavior: HitTestBehavior.opaque,
-                child: Container(color: Colors.transparent),
-              ),
-            ),
+            // No full-screen dismiss layer - taps on messages will dismiss via _toggleMessageSelection
+            // Taps on empty areas of the screen won't dismiss (user must tap a message or X button)
             // Reaction picker
             Positioned(
               top: top,
@@ -941,14 +1402,23 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
   }
 
   void _toggleMessageSelection(String messageId) {
+    // Dismiss reaction picker when selecting more messages
+    _removeReactionOverlay();
+    
     setState(() {
       if (_selectedMessageIds.contains(messageId)) {
         _selectedMessageIds.remove(messageId);
         if (_selectedMessageIds.isEmpty) {
           _selectionMode = false;
+        } else if (_selectedMessageIds.length == 1) {
+          // Back to single selection - show reaction picker again
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _showReactionPickerAboveMessage(_selectedMessageIds.first);
+          });
         }
       } else {
         _selectedMessageIds.add(messageId);
+        // More than one selected - reaction picker already dismissed above
       }
     });
   }

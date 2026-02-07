@@ -28,6 +28,7 @@ enum MessageType {
   text,
   call,
   encrypted,
+  voice,
 }
 
 /// Call status for call messages.
@@ -58,12 +59,18 @@ class FirestoreMessage {
     this.replyToMessageId,
     this.replyToFromUid,
     this.replyToText,
+    this.replyToTextEncrypted,
     this.reactions = const <String, List<String>>{},
     this.messageType = MessageType.text,
     this.callDurationSeconds,
     this.callStatus,
     this.deletedForEveryone = false,
     this.deletedForUsers = const <String>[],
+    this.voiceUrl,
+    this.voiceDurationSeconds,
+    this.voiceUrlCiphertextB64,
+    this.voiceUrlNonceB64,
+    this.voiceUrlMacB64,
   });
 
   final String id;
@@ -81,11 +88,13 @@ class FirestoreMessage {
   final String? replyToMessageId;
   final String? replyToFromUid;
   final String? replyToText;
+  /// Encrypted reply text (JSON with ciphertextB64, nonceB64, macB64).
+  final String? replyToTextEncrypted;
 
   /// Emoji -> list of uids.
   final Map<String, List<String>> reactions;
 
-  /// Type of message (text, call, encrypted).
+  /// Type of message (text, call, encrypted, voice).
   final MessageType messageType;
 
   /// Duration of the call in seconds (only for call messages).
@@ -100,8 +109,22 @@ class FirestoreMessage {
   /// List of user UIDs who have deleted this message for themselves.
   final List<String> deletedForUsers;
 
+  /// URL of the voice message audio file (only for voice messages, plaintext).
+  final String? voiceUrl;
+
+  /// Duration of the voice message in seconds (only for voice messages).
+  final int? voiceDurationSeconds;
+
+  /// Encrypted voice URL fields (for E2EE voice messages).
+  final String? voiceUrlCiphertextB64;
+  final String? voiceUrlNonceB64;
+  final String? voiceUrlMacB64;
+
   /// Helper to check if this is a call message.
   bool get isCallMessage => messageType == MessageType.call;
+
+  /// Helper to check if this is a voice message.
+  bool get isVoiceMessage => messageType == MessageType.voice;
 
   /// Check if the message is deleted for a specific user.
   bool isDeletedFor(String uid) => deletedForEveryone || deletedForUsers.contains(uid);
@@ -145,6 +168,8 @@ class FirestoreMessage {
     MessageType messageType;
     if (messageTypeStr == 'call') {
       messageType = MessageType.call;
+    } else if (messageTypeStr == 'voice') {
+      messageType = MessageType.voice;
     } else if (d['ciphertextB64'] != null) {
       messageType = MessageType.encrypted;
     } else {
@@ -188,6 +213,7 @@ class FirestoreMessage {
       replyToMessageId: d['replyToMessageId'] as String?,
       replyToFromUid: d['replyToFromUid'] as String?,
       replyToText: d['replyToText'] as String?,
+      replyToTextEncrypted: d['replyToTextEncrypted'] as String?,
       reactions: reactions,
       sentAt: sentAt,
       messageType: messageType,
@@ -195,6 +221,11 @@ class FirestoreMessage {
       callStatus: callStatus,
       deletedForEveryone: deletedForEveryone,
       deletedForUsers: deletedForUsers,
+      voiceUrl: d['voiceUrl'] as String?,
+      voiceDurationSeconds: d['voiceDurationSeconds'] as int?,
+      voiceUrlCiphertextB64: d['voiceUrlCiphertextB64'] as String?,
+      voiceUrlNonceB64: d['voiceUrlNonceB64'] as String?,
+      voiceUrlMacB64: d['voiceUrlMacB64'] as String?,
     );
   }
 }
