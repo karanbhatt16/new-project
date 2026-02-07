@@ -8,6 +8,8 @@ import '../../auth/firebase_auth_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../../posts/firestore_posts_controller.dart';
 import '../../posts/post_models.dart';
+import '../../preferences/theme_preferences.dart';
+import '../../vibeu_app.dart';
 import '../widgets/async_action.dart';
 import 'edit_profile_page.dart';
 import 'friends_list_page.dart';
@@ -542,45 +544,54 @@ class ProfilePage extends StatelessWidget {
             const SizedBox(height: 12),
 
             _SectionCard(
-              title: 'Security',
+              title: 'Appearance',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'End-to-end encryption (WhatsApp-like)',
+                    'Theme',
                     style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Back up your encryption key with a passphrase so you can restore chats on a new device. We never store your passphrase.',
+                    'Choose how VibeU looks to you. Select a theme preference below.',
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      FilledButton.tonalIcon(
-                        onPressed: () async {
-                          final pass = await _askPassphrase(context, title: 'Backup encryption key');
-                          if (!context.mounted) return;
-                          if (pass == null || pass.isEmpty) return;
-                          await runAsyncAction(context, () => auth.backupIdentityKey(passphrase: pass));
-                        },
-                        icon: const Icon(Icons.cloud_upload_outlined),
-                        label: const Text('Backup key'),
-                      ),
-                      FilledButton.tonalIcon(
-                        onPressed: () async {
-                          final pass = await _askPassphrase(context, title: 'Restore encryption key');
-                          if (!context.mounted) return;
-                          if (pass == null || pass.isEmpty) return;
-                          await runAsyncAction(context, () => auth.restoreIdentityKey(passphrase: pass));
-                        },
-                        icon: const Icon(Icons.cloud_download_outlined),
-                        label: const Text('Restore key'),
-                      ),
-                    ],
+                  ListenableBuilder(
+                    listenable: VibeUApp.themePreferences,
+                    builder: (context, _) {
+                      final currentMode = VibeUApp.themePreferences.themeMode;
+                      return Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: AppThemeMode.values.map((mode) {
+                          final isSelected = currentMode == mode;
+                          return ChoiceChip(
+                            label: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  ThemePreferences.getIcon(mode),
+                                  size: 18,
+                                  color: isSelected 
+                                      ? theme.colorScheme.onSecondaryContainer
+                                      : theme.colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(ThemePreferences.getDisplayName(mode)),
+                              ],
+                            ),
+                            selected: isSelected,
+                            onSelected: (selected) {
+                              if (selected) {
+                                VibeUApp.themePreferences.setThemeMode(mode);
+                              }
+                            },
+                          );
+                        }).toList(),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -714,36 +725,6 @@ class ProfilePage extends StatelessWidget {
       null => Icons.person_outline,
     };
   }
-}
-
-Future<String?> _askPassphrase(BuildContext context, {required String title}) async {
-  final controller = TextEditingController();
-  return showDialog<String>(
-    context: context,
-    builder: (context) {
-      return AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          decoration: const InputDecoration(
-            labelText: 'Passphrase',
-            hintText: 'Choose a strong passphrase',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Continue'),
-          ),
-        ],
-      );
-    },
-  ).whenComplete(controller.dispose);
 }
 
 class _SectionCard extends StatelessWidget {

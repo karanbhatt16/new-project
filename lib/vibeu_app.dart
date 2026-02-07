@@ -7,9 +7,13 @@ import 'chat/firestore_chat_controller.dart';
 import 'chat/e2ee_chat_controller.dart';
 import 'notifications/firestore_notifications_controller.dart';
 import 'posts/firestore_posts_controller.dart';
+import 'preferences/theme_preferences.dart';
 
 class VibeUApp extends StatefulWidget {
   const VibeUApp({super.key});
+
+  /// Global theme preferences instance - accessible throughout the app
+  static final themePreferences = ThemePreferences();
 
   @override
   State<VibeUApp> createState() => _VibeUAppState();
@@ -22,6 +26,24 @@ class _VibeUAppState extends State<VibeUApp> {
   late final _social = FirestoreSocialGraphController(chat: _chat);
   final _notifications = FirestoreNotificationsController();
   final _posts = FirestorePostsController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Load theme preferences and listen for changes
+    VibeUApp.themePreferences.load();
+    VibeUApp.themePreferences.addListener(_onThemeChanged);
+  }
+
+  @override
+  void dispose() {
+    VibeUApp.themePreferences.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+
+  void _onThemeChanged() {
+    setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -383,7 +405,7 @@ class _VibeUAppState extends State<VibeUApp> {
       debugShowCheckedModeBanner: false,
       theme: baseTheme(light),
       darkTheme: baseTheme(dark),
-      themeMode: ThemeMode.system,
+      themeMode: VibeUApp.themePreferences.flutterThemeMode,
       home: AuthGate(controller: _auth, social: _social, chat: _chat, e2eeChat: _e2eeChat, notifications: _notifications, posts: _posts),
     );
   }
