@@ -1,17 +1,19 @@
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
+import '../../social/local_filter_preferences.dart';
 import '../../social/local_swipe_store.dart';
 import '../widgets/async_error_view.dart';
 import 'swipe_deck.dart';
 import 'match_requests_page.dart';
 import 'user_profile_page.dart';
 
-class DiscoverPage extends StatelessWidget {
+class DiscoverPage extends StatefulWidget {
   const DiscoverPage({
     super.key,
     required this.signedInUid,
@@ -26,12 +28,640 @@ class DiscoverPage extends StatelessWidget {
   final FirestoreSocialGraphController social;
 
   @override
+  State<DiscoverPage> createState() => _DiscoverPageState();
+}
+
+class _DiscoverPageState extends State<DiscoverPage> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Tinder-like experience: full-screen swipe deck.
-    return _SwipeDiscover(
-      signedInUid: signedInUid,
-      auth: auth,
-      social: social,
+    final theme = Theme.of(context);
+    
+    return Column(
+      children: [
+        // Tab bar
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: TabBar(
+            controller: _tabController,
+            indicator: BoxDecoration(
+              color: theme.colorScheme.primary,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            indicatorSize: TabBarIndicatorSize.tab,
+            indicatorPadding: const EdgeInsets.all(4),
+            labelColor: theme.colorScheme.onPrimary,
+            unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
+            labelStyle: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+            dividerColor: Colors.transparent,
+            tabs: const [
+              Tab(text: 'Swipe'),
+              Tab(text: 'Search'),
+            ],
+          ),
+        ),
+        // Tab views
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              // Swipe tab
+              _SwipeDiscover(
+                signedInUid: widget.signedInUid,
+                auth: widget.auth,
+                social: widget.social,
+              ),
+              // Search tab
+              _SearchDiscover(
+                signedInUid: widget.signedInUid,
+                auth: widget.auth,
+                social: widget.social,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Search and discover people tab with search bar and suggestions.
+class _SearchDiscover extends StatefulWidget {
+  const _SearchDiscover({
+    required this.signedInUid,
+    required this.auth,
+    required this.social,
+  });
+
+  final String signedInUid;
+  final FirebaseAuthController auth;
+  final FirestoreSocialGraphController social;
+
+  @override
+  State<_SearchDiscover> createState() => _SearchDiscoverState();
+}
+
+class _SearchDiscoverState extends State<_SearchDiscover> {
+  final TextEditingController _searchController = TextEditingController();
+  final LocalFilterPreferences _filterPrefs = LocalFilterPreferences();
+  String _searchQuery = '';
+  
+  // Interest filter
+  final Set<String> _selectedInterests = {};
+  bool _showInterestFilter = false;
+  
+  List<AppUser>? _allUsers;
+  AppUser? _me;
+  Set<String>? _friends;
+  Map<String, List<String>>? _friendsOfFriends;
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFilterPreferences();
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Load saved filter preferences from local storage.
+  Future<void> _loadFilterPreferences() async {
+    final savedInterests = await _filterPrefs.loadSelectedInterests(widget.signedInUid);
+    final savedVisible = await _filterPrefs.loadFilterVisible(widget.signedInUid);
+    
+    if (!mounted) return;
+    
+    setState(() {
+      _selectedInterests.addAll(savedInterests);
+      _showInterestFilter = savedVisible;
+    });
+  }
+
+  /// Save current filter preferences to local storage.
+  Future<void> _saveFilterPreferences() async {
+    await _filterPrefs.saveSelectedInterests(widget.signedInUid, _selectedInterests);
+    await _filterPrefs.saveFilterVisible(widget.signedInUid, _showInterestFilter);
+  }
+
+  Future<void> _loadData({bool isRefresh = false}) async {
+    try {
+      if (!isRefresh) {
+        setState(() {
+          _isLoading = true;
+          _error = null;
+        });
+      }
+
+      final results = await Future.wait([
+        widget.auth.publicProfileByUid(widget.signedInUid),
+        widget.auth.getAllUsers(),
+        widget.social.getFriends(uid: widget.signedInUid),
+        widget.social.getFriendsOfFriends(uid: widget.signedInUid),
+      ]);
+
+      if (!mounted) return;
+
+      setState(() {
+        _me = results[0] as AppUser?;
+        _allUsers = results[1] as List<AppUser>;
+        _friends = results[2] as Set<String>;
+        _friendsOfFriends = results[3] as Map<String, List<String>>;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _onRefresh() async {
+    await _loadData(isRefresh: true);
+  }
+
+  /// Get all unique interests from all users for the filter
+  Set<String> _getAllInterests() {
+    if (_allUsers == null) return {};
+    
+    final interests = <String>{};
+    for (final user in _allUsers!) {
+      for (final interest in user.interests) {
+        final normalized = interest.trim();
+        if (normalized.isNotEmpty) {
+          interests.add(normalized);
+        }
+      }
+    }
+    return interests;
+  }
+
+  List<AppUser> _getSearchResults() {
+    if (_allUsers == null) return [];
+    
+    final query = _searchQuery.toLowerCase().trim();
+    if (query.isEmpty) return [];
+
+    var results = _allUsers!
+        .where((u) =>
+            u.uid != widget.signedInUid &&
+            (u.username.toLowerCase().contains(query) ||
+             u.email.toLowerCase().contains(query)))
+        .toList();
+
+    // Apply interest filter if any selected
+    if (_selectedInterests.isNotEmpty) {
+      results = results.where((u) {
+        final userInterests = u.interests
+            .map((e) => e.trim().toLowerCase())
+            .toSet();
+        final selectedLower = _selectedInterests
+            .map((e) => e.toLowerCase())
+            .toSet();
+        return userInterests.intersection(selectedLower).isNotEmpty;
+      }).toList();
+    }
+
+    return results;
+  }
+
+  List<AppUser> _getPeopleYouMayKnow() {
+    if (_allUsers == null || _friends == null || _friendsOfFriends == null || _me == null) {
+      return [];
+    }
+
+    final myInterests = _me!.interests
+        .map((e) => e.trim().toLowerCase())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+
+    // Get users who are friends of friends OR have similar interests
+    final candidates = <AppUser>[];
+    final addedUids = <String>{};
+
+    for (final user in _allUsers!) {
+      // Skip self and existing friends
+      if (user.uid == widget.signedInUid || _friends!.contains(user.uid)) continue;
+      
+      final isFriendOfFriend = _friendsOfFriends!.containsKey(user.uid);
+      
+      // Check for similar interests
+      final theirInterests = user.interests
+          .map((e) => e.trim().toLowerCase())
+          .where((e) => e.isNotEmpty)
+          .toSet();
+      final mutualInterests = myInterests.intersection(theirInterests);
+      final hasSimilarInterests = mutualInterests.isNotEmpty;
+
+      // Apply interest filter if any selected
+      if (_selectedInterests.isNotEmpty) {
+        final selectedLower = _selectedInterests
+            .map((e) => e.toLowerCase())
+            .toSet();
+        if (theirInterests.intersection(selectedLower).isEmpty) {
+          continue;
+        }
+      }
+
+      if (isFriendOfFriend || hasSimilarInterests || _selectedInterests.isNotEmpty) {
+        if (!addedUids.contains(user.uid)) {
+          candidates.add(user);
+          addedUids.add(user.uid);
+        }
+      }
+    }
+
+    // Sort: friends of friends first, then by number of mutual interests
+    candidates.sort((a, b) {
+      final aFof = _friendsOfFriends!.containsKey(a.uid);
+      final bFof = _friendsOfFriends!.containsKey(b.uid);
+      
+      if (aFof && !bFof) return -1;
+      if (!aFof && bFof) return 1;
+
+      // Count mutual interests
+      final aInterests = a.interests.map((e) => e.trim().toLowerCase()).toSet();
+      final bInterests = b.interests.map((e) => e.trim().toLowerCase()).toSet();
+      final aMutual = myInterests.intersection(aInterests).length;
+      final bMutual = myInterests.intersection(bInterests).length;
+
+      return bMutual.compareTo(aMutual);
+    });
+
+    return candidates;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return AsyncErrorView(error: _error!);
+    }
+
+    final searchResults = _getSearchResults();
+    final peopleYouMayKnow = _getPeopleYouMayKnow();
+    final showSearchResults = _searchQuery.isNotEmpty;
+    final allInterests = _getAllInterests().toList()..sort();
+
+    return Column(
+      children: [
+        // Search bar
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: TextField(
+            controller: _searchController,
+            onChanged: (value) => setState(() => _searchQuery = value),
+            decoration: InputDecoration(
+              hintText: 'Search by username or email...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_searchQuery.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                    ),
+                  // Filter button
+                  IconButton(
+                    icon: Badge(
+                      isLabelVisible: _selectedInterests.isNotEmpty,
+                      label: Text('${_selectedInterests.length}'),
+                      child: Icon(
+                        _showInterestFilter ? Icons.filter_list_off : Icons.filter_list,
+                        color: _selectedInterests.isNotEmpty 
+                            ? theme.colorScheme.primary 
+                            : null,
+                      ),
+                    ),
+                    onPressed: () {
+                      setState(() => _showInterestFilter = !_showInterestFilter);
+                      _saveFilterPreferences();
+                    },
+                    tooltip: 'Filter by interests',
+                  ),
+                ],
+              ),
+              filled: true,
+              fillColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            ),
+          ),
+        ),
+        // Interest filter chips
+        if (_showInterestFilter) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Filter by interests',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (_selectedInterests.isNotEmpty)
+                      TextButton(
+                        onPressed: () {
+                          setState(() => _selectedInterests.clear());
+                          _saveFilterPreferences();
+                        },
+                        child: const Text('Clear all'),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 40,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: allInterests.length,
+                    separatorBuilder: (context, index) => const SizedBox(width: 8),
+                    itemBuilder: (context, index) {
+                      final interest = allInterests[index];
+                      final isSelected = _selectedInterests.contains(interest);
+                      
+                      return FilterChip(
+                        label: Text(interest),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setState(() {
+                            if (selected) {
+                              _selectedInterests.add(interest);
+                            } else {
+                              _selectedInterests.remove(interest);
+                            }
+                          });
+                          _saveFilterPreferences();
+                        },
+                        selectedColor: theme.colorScheme.primaryContainer,
+                        checkmarkColor: theme.colorScheme.onPrimaryContainer,
+                        labelStyle: TextStyle(
+                          color: isSelected 
+                              ? theme.colorScheme.onPrimaryContainer
+                              : theme.colorScheme.onSurface,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+        ],
+        // Results with pull-to-refresh
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _onRefresh,
+            child: showSearchResults
+                ? _buildSearchResults(searchResults, theme)
+                : _buildPeopleYouMayKnow(peopleYouMayKnow, theme),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSearchResults(List<AppUser> results, ThemeData theme) {
+    if (results.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.search_off,
+              size: 64,
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No users found for "$_searchQuery"',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: results.length,
+      itemBuilder: (context, index) => _buildUserTile(results[index], theme),
+    );
+  }
+
+  Widget _buildPeopleYouMayKnow(List<AppUser> people, ThemeData theme) {
+    if (people.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.people_outline,
+              size: 64,
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No suggestions yet',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add friends to see suggestions',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: people.length + 1, // +1 for header
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.people,
+                  size: 20,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'People You May Know',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return _buildUserTile(people[index - 1], theme, showReason: true);
+      },
+    );
+  }
+
+  Widget _buildUserTile(AppUser user, ThemeData theme, {bool showReason = false}) {
+    final isFriendOfFriend = _friendsOfFriends?.containsKey(user.uid) ?? false;
+    final mutualFriends = _friendsOfFriends?[user.uid] ?? [];
+    
+    // Calculate mutual interests
+    final myInterests = (_me?.interests ?? [])
+        .map((e) => e.trim().toLowerCase())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final theirInterests = user.interests
+        .map((e) => e.trim().toLowerCase())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final mutualInterests = myInterests.intersection(theirInterests);
+
+    String? reason;
+    if (showReason) {
+      if (isFriendOfFriend && mutualFriends.isNotEmpty) {
+        reason = '${mutualFriends.length} mutual friend${mutualFriends.length > 1 ? 's' : ''}';
+      } else if (mutualInterests.isNotEmpty) {
+        reason = '${mutualInterests.length} similar interest${mutualInterests.length > 1 ? 's' : ''}';
+      }
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => UserProfilePage(
+                currentUserUid: widget.signedInUid,
+                user: user,
+                social: widget.social,
+                auth: widget.auth,
+              ),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Avatar
+              CircleAvatar(
+                radius: 28,
+                backgroundImage: user.profileImageBytes != null
+                    ? MemoryImage(Uint8List.fromList(user.profileImageBytes!))
+                    : null,
+                child: user.profileImageBytes == null
+                    ? Text(
+                        user.username.isEmpty ? '?' : user.username[0].toUpperCase(),
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 20),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              // User info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user.username,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (reason != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        reason,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                    if (user.bio.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        user.bio,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              // Arrow
+              Icon(
+                Icons.chevron_right,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -277,6 +907,7 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
                       currentUserUid: widget.signedInUid,
                       user: u,
                       social: widget.social,
+                      auth: widget.auth,
                     ),
                   ),
                 );

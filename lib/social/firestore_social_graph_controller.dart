@@ -515,4 +515,33 @@ class FirestoreSocialGraphController {
     final snap = await _db.collection('users').doc(uid).collection('friends').get();
     return snap.size;
   }
+
+  /// Fetches the set of friends for a user (one-time fetch, not a stream).
+  Future<Set<String>> getFriends({required String uid}) async {
+    final snap = await _db.collection('users').doc(uid).collection('friends').get();
+    return snap.docs.map((d) => d.id).toSet();
+  }
+
+  /// Fetches friends of friends (people your friends are friends with).
+  /// Returns a map of uid -> list of mutual friend uids (friends who connect you).
+  Future<Map<String, List<String>>> getFriendsOfFriends({required String uid}) async {
+    final myFriends = await getFriends(uid: uid);
+    if (myFriends.isEmpty) return {};
+
+    final friendsOfFriends = <String, List<String>>{};
+
+    // Fetch friends of each friend
+    for (final friendUid in myFriends) {
+      final theirFriends = await getFriends(uid: friendUid);
+      for (final fofUid in theirFriends) {
+        // Exclude self and direct friends
+        if (fofUid == uid || myFriends.contains(fofUid)) continue;
+        
+        friendsOfFriends.putIfAbsent(fofUid, () => []);
+        friendsOfFriends[fofUid]!.add(friendUid);
+      }
+    }
+
+    return friendsOfFriends;
+  }
 }

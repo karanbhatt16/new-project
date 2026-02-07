@@ -53,6 +53,9 @@ dependencies:
   # Emoji picker
   emoji_picker_flutter: ^4.3.0
 
+  # Simple preferences storage
+  shared_preferences: ^2.2.2
+
   # WebRTC for voice calls
   flutter_webrtc: ^0.12.9
 

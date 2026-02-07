@@ -124,56 +124,63 @@ class _SwipeDeckState extends State<SwipeDeck> {
 
     final mutual = widget.mutualInterestsByUid[u.uid] ?? const <String>[];
 
-    return Stack(
+    return Column(
       children: [
-        // Background card peek (next user)
-        if (_queue.length > 1)
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 120),
-              child: Transform.scale(
-                scale: 0.97,
-                child: _ProfileCard(
-                  user: _queue[1],
-                  mutualInterests: widget.mutualInterestsByUid[_queue[1].uid] ?? const <String>[],
-                  onTap: () => widget.onViewProfile(_queue[1]),
+        // Card area - takes available space
+        Expanded(
+          child: Stack(
+            children: [
+              // Background card peek (next user)
+              if (_queue.length > 1)
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: Transform.scale(
+                      scale: 0.97,
+                      child: _ProfileCard(
+                        user: _queue[1],
+                        mutualInterests: widget.mutualInterestsByUid[_queue[1].uid] ?? const <String>[],
+                        onTap: () => widget.onViewProfile(_queue[1]),
+                      ),
+                    ),
+                  ),
+                ),
+
+              // Top draggable card
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: _SwipeableCard(
+                    user: u,
+                    mutualInterests: mutual,
+                    enabled: !_busy,
+                    onFriend: () => _handleSwipe(u, SwipeAction.friend),
+                    onSkip: () => _handleSwipe(u, SwipeAction.skip),
+                    onTap: () => widget.onViewProfile(u),
+                  ),
                 ),
               ),
-            ),
-          ),
-
-        // Top draggable card
-        Positioned.fill(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 120),
-            child: _SwipeableCard(
-              user: u,
-              mutualInterests: mutual,
-              enabled: !_busy,
-              onFriend: () => _handleSwipe(u, SwipeAction.friend),
-              onSkip: () => _handleSwipe(u, SwipeAction.skip),
-              onTap: () => widget.onViewProfile(u),
-            ),
+            ],
           ),
         ),
 
-        // Action buttons
-        Align(
-          alignment: Alignment.bottomCenter,
+        // Action buttons - fixed at bottom, above nav bar
+        SafeArea(
+          top: false,
           child: Padding(
-            padding: const EdgeInsets.only(bottom: 28),
+            padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _ActionCircle(
-                  tooltip: 'Add friend',
+                  label: 'Friend',
                   icon: Icons.person_add_alt_1,
                   color: theme.colorScheme.primary,
                   onPressed: _busy ? null : () => _handleSwipe(u, SwipeAction.friend),
                 ),
-                const SizedBox(width: 22),
+                const SizedBox(width: 32),
                 _ActionCircle(
-                  tooltip: 'Match',
+                  label: 'Match',
                   icon: Icons.favorite,
                   color: theme.colorScheme.secondary,
                   onPressed: _busy ? null : () => _handleSwipe(u, SwipeAction.match),
@@ -189,13 +196,13 @@ class _SwipeDeckState extends State<SwipeDeck> {
 
 class _ActionCircle extends StatelessWidget {
   const _ActionCircle({
-    required this.tooltip,
+    required this.label,
     required this.icon,
     required this.color,
     required this.onPressed,
   });
 
-  final String tooltip;
+  final String label;
   final IconData icon;
   final Color color;
   final VoidCallback? onPressed;
@@ -203,15 +210,29 @@ class _ActionCircle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surface,
-      shape: const CircleBorder(),
-      elevation: 2,
-      child: IconButton(
-        tooltip: tooltip,
-        onPressed: onPressed,
-        icon: Icon(icon, color: color),
-        iconSize: 30,
+    return GestureDetector(
+      onTap: onPressed,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Material(
+            color: theme.colorScheme.surface,
+            shape: const CircleBorder(),
+            elevation: 2,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Icon(icon, color: onPressed != null ? color : color.withValues(alpha: 0.4), size: 30),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

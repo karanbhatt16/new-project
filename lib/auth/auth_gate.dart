@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../ui/app_shell.dart';
+import 'app_user.dart';
 import 'firebase_auth_controller.dart';
 import '../ui/auth/welcome_page.dart';
 
@@ -10,7 +11,7 @@ import '../chat/firestore_chat_controller.dart';
 import '../notifications/firestore_notifications_controller.dart';
 import '../posts/firestore_posts_controller.dart';
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({
     super.key,
     required this.controller,
@@ -27,17 +28,39 @@ class AuthGate extends StatelessWidget {
   final FirestorePostsController posts;
 
   @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  // Cache the profile future to prevent refetching on every rebuild
+  Future<AppUser?>? _profileFuture;
+  String? _currentUid;
+
+  void _updateProfileFuture(String uid) {
+    if (_currentUid != uid) {
+      _currentUid = uid;
+      _profileFuture = widget.controller.getCurrentProfile();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: controller,
+      animation: widget.controller,
       builder: (context, _) {
-        final fbUser = controller.firebaseUser;
+        final fbUser = widget.controller.firebaseUser;
         if (fbUser == null) {
-          return WelcomePage(controller: controller);
+          // Clear cached profile when user signs out
+          _currentUid = null;
+          _profileFuture = null;
+          return WelcomePage(controller: widget.controller);
         }
 
+        // Update profile future only when uid changes
+        _updateProfileFuture(fbUser.uid);
+
         return FutureBuilder(
-          future: controller.getCurrentProfile(),
+          future: _profileFuture,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return Center(child: Text('Failed to load profile: ${snapshot.error}'));
@@ -54,12 +77,12 @@ class AuthGate extends StatelessWidget {
             return AppShell(
               signedInUid: fbUser.uid,
               signedInEmail: profile.email,
-              onSignOut: () => controller.signOut(),
-              auth: controller,
-              social: social,
-              chat: chat,
-              notifications: notifications,
-              posts: posts,
+              onSignOut: () => widget.controller.signOut(),
+              auth: widget.controller,
+              social: widget.social,
+              chat: widget.chat,
+              notifications: widget.notifications,
+              posts: widget.posts,
             );
           },
         );

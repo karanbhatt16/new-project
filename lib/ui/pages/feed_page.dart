@@ -20,9 +20,14 @@ class FeedPage extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    // Get bottom padding to account for bottom nav bar
+    final bottomNavBarHeight = MediaQuery.of(context).padding.bottom + 16;
+
     return Scaffold(
       backgroundColor: theme.colorScheme.surface,
-      floatingActionButton: Container(
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(bottom: bottomNavBarHeight),
+        child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
@@ -72,6 +77,7 @@ class FeedPage extends StatelessWidget {
               ),
             ),
           ),
+        ),
         ),
       ),
       body: StreamBuilder(

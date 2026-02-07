@@ -293,25 +293,31 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                         return const Center(child: CircularProgressIndicator());
                       }
 
+                      // Filter out messages deleted "for me" (but keep "deleted for everyone" to show placeholder)
+                      final visibleMessages = messages.where((m) {
+                        // If deleted for everyone, show it (with "This message was deleted")
+                        if (m.deletedForEveryone) return true;
+                        // If deleted only for this user, hide it completely
+                        if (m.deletedForUsers.contains(widget.currentUser.uid)) return false;
+                        return true;
+                      }).toList();
+
                       return ListView.builder(
                         padding: const EdgeInsets.all(16),
                         reverse: true,
-                        itemCount: messages.length,
+                        itemCount: visibleMessages.length,
                         itemBuilder: (context, index) {
-                          final m = messages[messages.length - 1 - index];
+                          final m = visibleMessages[visibleMessages.length - 1 - index];
                           
                           // Check if we need to show a date separator
                           final showDateSeparator = _shouldShowDateSeparator(
-                            messages: messages,
-                            currentIndex: messages.length - 1 - index,
+                            messages: visibleMessages,
+                            currentIndex: visibleMessages.length - 1 - index,
                           );
                           final isMe = m.fromUid == widget.currentUser.uid;
-                          final isDeleted = m.isDeletedFor(widget.currentUser.uid);
+                          final isDeleted = m.deletedForEveryone; // Only show "deleted" for everyone
                           final text = widget.chat.displayText(m, forUid: widget.currentUser.uid);
                           final isSelected = _selectedMessageIds.contains(m.id);
-
-                          // Skip messages deleted for this user (don't show at all)
-                          // Or show "This message was deleted" - we'll show it
                           
                           // WhatsApp-like colors: outgoing slightly tinted, incoming neutral.
                           final myBubble = isMatch

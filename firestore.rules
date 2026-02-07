@@ -146,7 +146,11 @@ service cloud.firestore {
       allow update: if isMe(uid);
 
       match /friends/{friendUid} {
-        allow read: if isMe(uid);
+        // Allow reading friends list if:
+        // 1. It's your own friends list, OR
+        // 2. You are friends with this user (to enable "friends of friends" discovery)
+        allow read: if isMe(uid) 
+          || exists(/databases/$(database)/documents/users/$(request.auth.uid)/friends/$(uid));
         
         // Allow create if:
         // 1. User is adding to their own friends list, OR

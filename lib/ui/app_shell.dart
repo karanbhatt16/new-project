@@ -315,8 +315,8 @@ class _AppShellState extends State<AppShell> {
     final isDark = theme.brightness == Brightness.dark;
     
     return Scaffold(
-      extendBody: true,
-      appBar: AppBar(
+        extendBody: true,
+        appBar: AppBar(
         elevation: 0,
         scrolledUnderElevation: 0,
         backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.95),

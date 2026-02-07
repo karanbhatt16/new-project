@@ -108,6 +108,7 @@ class _FriendsListPageState extends State<FriendsListPage> {
                                 currentUserUid: widget.signedInUid,
                                 user: u,
                                 social: widget.social,
+                                auth: widget.auth,
                               ),
                             ),
                           ),

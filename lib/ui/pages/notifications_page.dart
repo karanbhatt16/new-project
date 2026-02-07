@@ -72,18 +72,6 @@ class NotificationsPage extends StatelessWidget {
                 builder: (context, uSnap) {
                   final u = uSnap.data;
                   final actorName = u?.username ?? 'Someone';
-
-                  final text = switch (n.type) {
-                    NotificationType.friendRequestSent => '$actorName sent you a friend request',
-                    NotificationType.friendRequestAccepted => '$actorName accepted your friend request',
-                    NotificationType.friendRequestDeclined => '$actorName declined your friend request',
-                    NotificationType.friendRequestCancelled => '$actorName cancelled a friend request',
-                    NotificationType.message => 'New message from $actorName',
-                    NotificationType.postLike => '$actorName liked your post',
-                    NotificationType.postComment => '$actorName commented on your post',
-                    NotificationType.storyLike => '$actorName liked your story',
-                  };
-
                   final isFriendRequest = n.type == NotificationType.friendRequestSent;
 
                   return Container(
@@ -113,11 +101,27 @@ class NotificationsPage extends StatelessWidget {
                                   )
                                 : null,
                           ),
-                          title: Text(
-                            text,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: n.read ? FontWeight.w400 : FontWeight.w600,
-                            ),
+                          title: _buildNotificationText(
+                            context: context,
+                            theme: theme,
+                            actorName: actorName,
+                            notificationType: n.type,
+                            isRead: n.read,
+                            user: u,
+                            onUsernameTap: u != null
+                                ? () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => UserProfilePage(
+                                          currentUserUid: signedInUid,
+                                          user: u,
+                                          social: social,
+                                          auth: auth,
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                : null,
                           ),
                           subtitle: Padding(
                             padding: const EdgeInsets.only(top: 4),
@@ -167,6 +171,7 @@ class NotificationsPage extends StatelessWidget {
                                                 currentUserUid: signedInUid,
                                                 user: u,
                                                 social: social,
+                                                auth: auth,
                                               ),
                                             ),
                                           );
@@ -232,4 +237,60 @@ String _timeAgo(DateTime dt) {
   if (d.inMinutes < 60) return '${d.inMinutes}m';
   if (d.inHours < 24) return '${d.inHours}h';
   return '${d.inDays}d';
+}
+
+/// Builds the notification text with a tappable username that opens the user's profile.
+Widget _buildNotificationText({
+  required BuildContext context,
+  required ThemeData theme,
+  required String actorName,
+  required NotificationType notificationType,
+  required bool isRead,
+  required AppUser? user,
+  required VoidCallback? onUsernameTap,
+}) {
+  // Get the text parts before and after the username
+  final (String prefix, String suffix) = switch (notificationType) {
+    NotificationType.friendRequestSent => ('', ' sent you a friend request'),
+    NotificationType.friendRequestAccepted => ('', ' accepted your friend request'),
+    NotificationType.friendRequestDeclined => ('', ' declined your friend request'),
+    NotificationType.friendRequestCancelled => ('', ' cancelled a friend request'),
+    NotificationType.message => ('New message from ', ''),
+    NotificationType.postLike => ('', ' liked your post'),
+    NotificationType.postComment => ('', ' commented on your post'),
+    NotificationType.storyLike => ('', ' liked your story'),
+  };
+
+  final baseStyle = theme.textTheme.bodyMedium?.copyWith(
+    fontWeight: isRead ? FontWeight.w400 : FontWeight.w600,
+  );
+
+  final usernameStyle = baseStyle?.copyWith(
+    color: theme.colorScheme.primary,
+    fontWeight: FontWeight.w700,
+  );
+
+  return Text.rich(
+    TextSpan(
+      style: baseStyle,
+      children: [
+        if (prefix.isNotEmpty) TextSpan(text: prefix),
+        WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: GestureDetector(
+            onTap: onUsernameTap,
+            child: Text(
+              actorName,
+              style: usernameStyle?.copyWith(
+                decoration: onUsernameTap != null ? TextDecoration.underline : null,
+                decorationColor: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+        ),
+        if (suffix.isNotEmpty) TextSpan(text: suffix),
+      ],
+    ),
+  );
 }

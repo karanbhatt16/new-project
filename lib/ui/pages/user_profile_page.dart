@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../auth/app_user.dart';
+import '../../auth/firebase_auth_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_action.dart';
 
@@ -12,11 +13,13 @@ class UserProfilePage extends StatelessWidget {
     required this.currentUserUid,
     required this.user,
     required this.social,
+    this.auth,
   });
 
   final String currentUserUid;
   final AppUser user;
   final FirestoreSocialGraphController social;
+  final FirebaseAuthController? auth;
 
   @override
   Widget build(BuildContext context) {
@@ -92,26 +95,455 @@ class UserProfilePage extends StatelessWidget {
                 return const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()));
               }
 
-              return _ActionCard(
-                status: s,
-                onAdd: () => runAsyncAction(
-                      context,
-                      () => social.sendRequest(fromUid: currentUserUid, toUid: user.uid),
+              return Column(
+                children: [
+                  _ActionCard(
+                    status: s,
+                    onAdd: () => runAsyncAction(
+                          context,
+                          () => social.sendRequest(fromUid: currentUserUid, toUid: user.uid),
+                        ),
+                    onCancel: () => runAsyncAction(
+                          context,
+                          () => social.cancelOutgoing(fromUid: currentUserUid, toUid: user.uid),
+                        ),
+                    onAccept: () => runAsyncAction(
+                          context,
+                          () => social.acceptIncoming(toUid: currentUserUid, fromUid: user.uid),
+                        ),
+                    onDecline: () => runAsyncAction(
+                          context,
+                          () => social.declineIncoming(toUid: currentUserUid, fromUid: user.uid),
+                        ),
+                  ),
+                  // Show friends list if we're friends with this user
+                  if (s.areFriends && auth != null) ...[
+                    const SizedBox(height: 12),
+                    _FriendsSection(
+                      currentUserUid: currentUserUid,
+                      profileUserUid: user.uid,
+                      profileUsername: user.username,
+                      social: social,
+                      auth: auth!,
                     ),
-                onCancel: () => runAsyncAction(
-                      context,
-                      () => social.cancelOutgoing(fromUid: currentUserUid, toUid: user.uid),
-                    ),
-                onAccept: () => runAsyncAction(
-                      context,
-                      () => social.acceptIncoming(toUid: currentUserUid, fromUid: user.uid),
-                    ),
-                onDecline: () => runAsyncAction(
-                      context,
-                      () => social.declineIncoming(toUid: currentUserUid, fromUid: user.uid),
-                    ),
+                  ],
+                ],
               );
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shows the friends of the profile user.
+class _FriendsSection extends StatelessWidget {
+  const _FriendsSection({
+    required this.currentUserUid,
+    required this.profileUserUid,
+    required this.profileUsername,
+    required this.social,
+    required this.auth,
+  });
+
+  final String currentUserUid;
+  final String profileUserUid;
+  final String profileUsername;
+  final FirestoreSocialGraphController social;
+  final FirebaseAuthController auth;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.people, size: 20, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  "$profileUsername's Friends",
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Fetch both the profile user's friends AND current user's friends
+            FutureBuilder<(Set<String>, Set<String>)>(
+              future: () async {
+                final results = await Future.wait([
+                  social.getFriends(uid: profileUserUid),
+                  social.getFriends(uid: currentUserUid),
+                ]);
+                return (results[0], results[1]);
+              }(),
+              builder: (context, friendsSnap) {
+                if (friendsSnap.hasError) {
+                  return Text(
+                    'Could not load friends',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  );
+                }
+                if (!friendsSnap.hasData) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(8),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  );
+                }
+
+                final profileFriendUids = friendsSnap.data!.$1.toList();
+                final myFriendUids = friendsSnap.data!.$2;
+                
+                if (profileFriendUids.isEmpty) {
+                  return Text(
+                    'No friends yet',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  );
+                }
+
+                // Calculate mutual friends (excluding self)
+                final mutualFriendUids = profileFriendUids
+                    .where((uid) => uid != currentUserUid && myFriendUids.contains(uid))
+                    .toSet();
+
+                return FutureBuilder<List<AppUser>>(
+                  future: auth.publicProfilesByUids(profileFriendUids),
+                  builder: (context, usersSnap) {
+                    if (usersSnap.hasError) {
+                      return Text(
+                        'Could not load friends',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                        ),
+                      );
+                    }
+                    if (!usersSnap.hasData) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      );
+                    }
+
+                    final friends = usersSnap.data!;
+                    
+                    // Sort: mutual friends first, then alphabetically
+                    friends.sort((a, b) {
+                      final aMutual = mutualFriendUids.contains(a.uid);
+                      final bMutual = mutualFriendUids.contains(b.uid);
+                      if (aMutual && !bMutual) return -1;
+                      if (!aMutual && bMutual) return 1;
+                      return a.username.toLowerCase().compareTo(b.username.toLowerCase());
+                    });
+
+                    // Show max 5 friends, with a "See all" option
+                    final displayFriends = friends.take(5).toList();
+                    final hasMore = friends.length > 5;
+
+                    return Column(
+                      children: [
+                        // Show mutual friends count if any
+                        if (mutualFriendUids.isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.people_alt_rounded,
+                                  size: 16,
+                                  color: theme.colorScheme.primary,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${mutualFriendUids.length} mutual friend${mutualFriendUids.length > 1 ? 's' : ''}',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        for (final friend in displayFriends) ...[
+                          _FriendTile(
+                            friend: friend,
+                            currentUserUid: currentUserUid,
+                            social: social,
+                            auth: auth,
+                            isMutualFriend: mutualFriendUids.contains(friend.uid),
+                          ),
+                          if (friend != displayFriends.last) const SizedBox(height: 8),
+                        ],
+                        if (hasMore) ...[
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => _AllFriendsPage(
+                                    currentUserUid: currentUserUid,
+                                    profileUsername: profileUsername,
+                                    friends: friends,
+                                    social: social,
+                                    auth: auth,
+                                    mutualFriendUids: mutualFriendUids,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Text('See all ${friends.length} friends'),
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FriendTile extends StatelessWidget {
+  const _FriendTile({
+    required this.friend,
+    required this.currentUserUid,
+    required this.social,
+    required this.auth,
+    this.isMutualFriend = false,
+  });
+
+  final AppUser friend;
+  final String currentUserUid;
+  final FirestoreSocialGraphController social;
+  final FirebaseAuthController auth;
+  final bool isMutualFriend;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isMe = friend.uid == currentUserUid;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: isMe
+          ? null
+          : () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => UserProfilePage(
+                    currentUserUid: currentUserUid,
+                    user: friend,
+                    social: social,
+                    auth: auth,
+                  ),
+                ),
+              );
+            },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+        child: Row(
+          children: [
+            // Avatar with mutual friend indicator
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundImage: friend.profileImageBytes != null
+                      ? MemoryImage(Uint8List.fromList(friend.profileImageBytes!))
+                      : null,
+                  child: friend.profileImageBytes == null
+                      ? Text(
+                          friend.username.isEmpty ? '?' : friend.username[0].toUpperCase(),
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        )
+                      : null,
+                ),
+                if (isMutualFriend)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: theme.colorScheme.surface,
+                          width: 2,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.people_alt_rounded,
+                        size: 10,
+                        color: theme.colorScheme.onPrimary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        isMe ? '${friend.username} (You)' : friend.username,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (isMutualFriend && !isMe) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'Mutual',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (friend.bio.isNotEmpty)
+                    Text(
+                      friend.bio,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (!isMe)
+              Icon(
+                Icons.chevron_right,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Full page showing all friends of a user.
+class _AllFriendsPage extends StatelessWidget {
+  const _AllFriendsPage({
+    required this.currentUserUid,
+    required this.profileUsername,
+    required this.friends,
+    required this.social,
+    required this.auth,
+    required this.mutualFriendUids,
+  });
+
+  final String currentUserUid;
+  final String profileUsername;
+  final List<AppUser> friends;
+  final FirestoreSocialGraphController social;
+  final FirebaseAuthController auth;
+  final Set<String> mutualFriendUids;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mutualCount = mutualFriendUids.length;
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("$profileUsername's Friends"),
+      ),
+      body: Column(
+        children: [
+          // Mutual friends summary at top
+          if (mutualCount > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.people_alt_rounded,
+                      size: 20,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '$mutualCount mutual friend${mutualCount > 1 ? 's' : ''}',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          // Friends list
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: friends.length,
+              itemBuilder: (context, index) {
+                final friend = friends[index];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _FriendTile(
+                    friend: friend,
+                    currentUserUid: currentUserUid,
+                    social: social,
+                    auth: auth,
+                    isMutualFriend: mutualFriendUids.contains(friend.uid),
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
