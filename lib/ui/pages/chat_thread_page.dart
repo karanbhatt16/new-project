@@ -12,7 +12,7 @@ import '../../auth/app_user.dart';
 import '../../call/voice_call_controller.dart';
 import '../../chat/firestore_chat_controller.dart';
 import '../../chat/e2ee_chat_controller.dart';
-import '../../chat/firestore_chat_models.dart' show FirestoreChatThread, FirestoreMessage, CallMessageStatus;
+import '../../chat/firestore_chat_models.dart' show FirestoreChatThread, FirestoreMessage, CallMessageStatus, MessageStatus;
 import '../../notifications/firestore_notifications_controller.dart';
 import '../../posts/cloudinary_uploader.dart';
 import '../../social/firestore_social_graph_controller.dart';
@@ -56,6 +56,63 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
     final hour12 = (h % 12 == 0) ? 12 : (h % 12);
     final ampm = h >= 12 ? 'PM' : 'AM';
     return '$hour12:$m $ampm';
+  }
+
+  /// Build tick marks widget based on message status
+  /// - Single grey tick: sent
+  /// - Double grey tick: delivered
+  /// - Double blue tick: read
+  Widget _buildMessageTicks(MessageStatus status, ThemeData theme) {
+    const double iconSize = 14;
+    final Color greyColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7);
+    const Color blueColor = Color(0xFF34B7F1); // WhatsApp blue
+
+    switch (status) {
+      case MessageStatus.sending:
+        return Icon(
+          Icons.access_time,
+          size: iconSize,
+          color: greyColor,
+        );
+      case MessageStatus.sent:
+        return Icon(
+          Icons.check,
+          size: iconSize,
+          color: greyColor,
+        );
+      case MessageStatus.delivered:
+        return SizedBox(
+          width: iconSize + 4,
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                child: Icon(Icons.check, size: iconSize, color: greyColor),
+              ),
+              Positioned(
+                left: 5,
+                child: Icon(Icons.check, size: iconSize, color: greyColor),
+              ),
+            ],
+          ),
+        );
+      case MessageStatus.read:
+        return SizedBox(
+          width: iconSize + 4,
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                child: Icon(Icons.check, size: iconSize, color: blueColor),
+              ),
+              Positioned(
+                left: 5,
+                child: Icon(Icons.check, size: iconSize, color: blueColor),
+              ),
+            ],
+          ),
+        );
+    }
   }
 
   final _controller = TextEditingController();
@@ -130,7 +187,12 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
   }
 
   Future<void> _markMessagesAsRead() async {
-    // Mark the actual messages as read (for unread count badge)
+    // First mark messages as delivered (grey double tick)
+    await widget.chat.markMessagesAsDelivered(
+      threadId: widget.thread.id,
+      myUid: widget.currentUser.uid,
+    );
+    // Then mark as read (blue double tick)
     await widget.chat.markThreadAsRead(
       threadId: widget.thread.id,
       myUid: widget.currentUser.uid,
@@ -573,16 +635,26 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                                                               ],
                                                             ),
                                                           ),
-                                                          // Timestamp
+                                                          // Timestamp and tick marks
                                                           const SizedBox(width: 8),
                                                           Padding(
                                                             padding: const EdgeInsets.only(bottom: 0),
-                                                            child: Text(
-                                                              _formatTime(m.sentAt),
-                                                              style: theme.textTheme.labelSmall?.copyWith(
-                                                                fontSize: 11,
-                                                                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
-                                                              ),
+                                                            child: Row(
+                                                              mainAxisSize: MainAxisSize.min,
+                                                              children: [
+                                                                Text(
+                                                                  _formatTime(m.sentAt),
+                                                                  style: theme.textTheme.labelSmall?.copyWith(
+                                                                    fontSize: 11,
+                                                                    color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                                                                  ),
+                                                                ),
+                                                                // Show tick marks only for messages sent by current user
+                                                                if (isMe && !isDeleted) ...[
+                                                                  const SizedBox(width: 3),
+                                                                  _buildMessageTicks(m.status, theme),
+                                                                ],
+                                                              ],
                                                             ),
                                                           ),
                                                         ],
@@ -1137,12 +1209,22 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
-                          Text(
-                            _formatTime(message.sentAt),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              fontSize: 11,
-                              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _formatTime(message.sentAt),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  fontSize: 11,
+                                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                                ),
+                              ),
+                              // Show tick marks only for messages sent by current user
+                              if (isMe) ...[
+                                const SizedBox(width: 3),
+                                _buildMessageTicks(message.status, theme),
+                              ],
+                            ],
                           ),
                         ],
                       ),

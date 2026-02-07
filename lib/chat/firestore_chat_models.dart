@@ -31,6 +31,18 @@ enum MessageType {
   voice,
 }
 
+/// Message delivery status enum.
+enum MessageStatus {
+  /// Message is being sent (not yet confirmed by server)
+  sending,
+  /// Message has been sent to server (single grey tick)
+  sent,
+  /// Message has been delivered to recipient's device (double grey tick)
+  delivered,
+  /// Message has been read by recipient (double blue tick)
+  read,
+}
+
 /// Call status for call messages.
 enum CallMessageStatus {
   completed,  // Call was answered and ended normally
@@ -71,6 +83,7 @@ class FirestoreMessage {
     this.voiceUrlCiphertextB64,
     this.voiceUrlNonceB64,
     this.voiceUrlMacB64,
+    this.status = MessageStatus.sent,
   });
 
   final String id;
@@ -119,6 +132,9 @@ class FirestoreMessage {
   final String? voiceUrlCiphertextB64;
   final String? voiceUrlNonceB64;
   final String? voiceUrlMacB64;
+
+  /// Delivery status of the message (sent, delivered, read).
+  final MessageStatus status;
 
   /// Helper to check if this is a call message.
   bool get isCallMessage => messageType == MessageType.call;
@@ -201,6 +217,25 @@ class FirestoreMessage {
     final deletedForUsersRaw = d['deletedForUsers'] as List?;
     final deletedForUsers = deletedForUsersRaw?.whereType<String>().toList() ?? <String>[];
 
+    // Parse message delivery status
+    MessageStatus messageStatus;
+    final statusStr = d['status'] as String?;
+    switch (statusStr) {
+      case 'sending':
+        messageStatus = MessageStatus.sending;
+        break;
+      case 'delivered':
+        messageStatus = MessageStatus.delivered;
+        break;
+      case 'read':
+        messageStatus = MessageStatus.read;
+        break;
+      case 'sent':
+      default:
+        messageStatus = MessageStatus.sent;
+        break;
+    }
+
     return FirestoreMessage(
       id: doc.id,
       threadId: threadId,
@@ -226,6 +261,7 @@ class FirestoreMessage {
       voiceUrlCiphertextB64: d['voiceUrlCiphertextB64'] as String?,
       voiceUrlNonceB64: d['voiceUrlNonceB64'] as String?,
       voiceUrlMacB64: d['voiceUrlMacB64'] as String?,
+      status: messageStatus,
     );
   }
 }

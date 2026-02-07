@@ -227,6 +227,7 @@ class FirestoreChatController extends ChangeNotifier {
       'replyToMessageId': replyToMessageId,
       'replyToFromUid': replyToFromUid,
       'replyToText': replyToText,
+      'status': 'sent', // Message delivery status
     });
 
     await _db.collection('threads').doc(threadId).set({
@@ -277,6 +278,7 @@ class FirestoreChatController extends ChangeNotifier {
       'replyToMessageId': replyToMessageId,
       'replyToFromUid': replyToFromUid,
       'replyToTextEncrypted': replyToTextEncrypted,
+      'status': 'sent', // Message delivery status
     });
 
     await _db.collection('threads').doc(threadId).set({
@@ -329,6 +331,7 @@ class FirestoreChatController extends ChangeNotifier {
       'replyToMessageId': replyToMessageId,
       'replyToFromUid': replyToFromUid,
       'replyToTextEncrypted': replyToTextEncrypted,
+      'status': 'sent', // Message delivery status
     });
 
     await _db.collection('threads').doc(threadId).set({
@@ -600,6 +603,7 @@ class FirestoreChatController extends ChangeNotifier {
       'replyToMessageId': replyToMessageId,
       'replyToFromUid': replyToFromUid,
       'replyToText': replyToText,
+      'status': 'sent', // Message delivery status
     });
 
     await _db.collection('threads').doc(threadId).set({
@@ -679,25 +683,81 @@ class FirestoreChatController extends ChangeNotifier {
   /// Marks all messages in a thread as read for the current user.
   /// 
   /// Call this when the user opens a chat thread.
+  /// Updates both the 'read' field and the 'status' field to 'read'.
   Future<void> markThreadAsRead({required String threadId, required String myUid}) async {
-    final unreadMessages = await _db
+    final messages = await _db
         .collection('threads')
         .doc(threadId)
         .collection('messages')
         .where('toUid', isEqualTo: myUid)
         .get();
 
-    if (unreadMessages.docs.isEmpty) return;
+    if (messages.docs.isEmpty) return;
 
     final batch = _db.batch();
-    for (final doc in unreadMessages.docs) {
+    int updateCount = 0;
+    for (final doc in messages.docs) {
       final data = doc.data();
-      // Only update if not already read
-      if (data['read'] != true) {
-        batch.update(doc.reference, {'read': true});
+      final status = data['status'] as String?;
+      final isRead = data['read'] as bool? ?? false;
+      
+      // Update if not already marked as read (handles old messages too)
+      if (!isRead || status != 'read') {
+        batch.update(doc.reference, {
+          'read': true,
+          'status': 'read', // Blue double tick
+        });
+        updateCount++;
+      }
+    }
+    
+    if (updateCount > 0) {
+      await batch.commit();
+    }
+  }
+
+  /// Marks all messages in a thread as delivered.
+  /// 
+  /// Call this when the recipient's device receives the messages.
+  /// Only updates messages that are still in 'sent' status or have no status.
+  Future<void> markMessagesAsDelivered({required String threadId, required String myUid}) async {
+    final messages = await _db
+        .collection('threads')
+        .doc(threadId)
+        .collection('messages')
+        .where('toUid', isEqualTo: myUid)
+        .get();
+
+    if (messages.docs.isEmpty) return;
+
+    final batch = _db.batch();
+    for (final doc in messages.docs) {
+      final data = doc.data();
+      final status = data['status'] as String?;
+      // Only update if status is 'sent' or null (old messages without status)
+      if (status == null || status == 'sent') {
+        batch.update(doc.reference, {'status': 'delivered'});
       }
     }
     await batch.commit();
+  }
+
+  /// Marks a single message as read.
+  /// 
+  /// Useful for marking individual messages as read.
+  Future<void> markMessageAsRead({
+    required String threadId,
+    required String messageId,
+  }) async {
+    await _db
+        .collection('threads')
+        .doc(threadId)
+        .collection('messages')
+        .doc(messageId)
+        .update({
+          'read': true,
+          'status': 'read',
+        });
   }
 
   /// Get a thread by ID, preferring cache for instant loading.

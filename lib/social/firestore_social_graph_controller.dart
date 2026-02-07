@@ -222,35 +222,42 @@ class FirestoreSocialGraphController {
     final toRef = _db.collection('users').doc(toUid);
     final reqRef = _db.collection('match_requests').doc(matchRequestId(fromUid, toUid));
 
-    await _db.runTransaction((tx) async {
-      final fromSnap = await tx.get(fromRef);
-      final toSnap = await tx.get(toRef);
-      if (!fromSnap.exists || !toSnap.exists) return;
-
-      final from = fromSnap.data() as Map<String, dynamic>;
-      final to = toSnap.data() as Map<String, dynamic>;
-
-      // Soft one-match constraint (client-driven). For strict enforcement use Cloud Functions.
-      if ((from['activeMatchWithUid'] as String?) != null) {
-        throw StateError('You already have a match. Break it before requesting a new one.');
-      }
-      if ((to['activeMatchWithUid'] as String?) != null) {
-        // Target is currently matched.
+    // Check if request already exists (outside transaction to avoid permission issues)
+    try {
+      final existingReq = await reqRef.get();
+      if (existingReq.exists && existingReq.data()?['status'] == 'pending') {
+        // Request already pending, no need to create again
         return;
       }
+    } catch (_) {
+      // Document may not exist or we may not have permission to read - that's fine, proceed
+    }
 
-      final existing = await tx.get(reqRef);
-      if (existing.exists && existing.data()?['status'] == 'pending') {
-        return;
-      }
+    // Check user states outside transaction
+    final fromSnap = await fromRef.get();
+    final toSnap = await toRef.get();
+    
+    if (!fromSnap.exists || !toSnap.exists) return;
 
-      tx.set(reqRef, {
-        'fromUid': fromUid,
-        'toUid': toUid,
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+    final from = fromSnap.data() as Map<String, dynamic>;
+    final to = toSnap.data() as Map<String, dynamic>;
+
+    // Soft one-match constraint (client-driven). For strict enforcement use Cloud Functions.
+    if ((from['activeMatchWithUid'] as String?) != null) {
+      throw StateError('You already have a match. Break it before requesting a new one.');
+    }
+    if ((to['activeMatchWithUid'] as String?) != null) {
+      // Target is currently matched - silently return
+      return;
+    }
+
+    // Create the match request
+    await reqRef.set({
+      'fromUid': fromUid,
+      'toUid': toUid,
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
 
     await _notifications.create(

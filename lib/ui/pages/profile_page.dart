@@ -11,11 +11,10 @@ import '../../posts/post_models.dart';
 import '../../preferences/theme_preferences.dart';
 import '../../vibeu_app.dart';
 import '../widgets/async_action.dart';
+import '_post_widgets.dart';
 import 'edit_profile_page.dart';
 import 'friends_list_page.dart';
 import 'match_history_page.dart';
-import 'my_post_detail_page.dart';
-import 'post_image_widget.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({
@@ -514,29 +513,34 @@ class ProfilePage extends StatelessWidget {
                     return const Text('No posts yet. Create one from the Feed tab.');
                   }
 
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: items.length,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      mainAxisSpacing: 6,
-                      crossAxisSpacing: 6,
-                    ),
-                    itemBuilder: (context, index) {
-                      final p = items[index];
-                      return InkWell(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => MyPostDetailPage(post: p)),
-                          );
-                        },
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: PostImage(post: p),
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${items.length} post${items.length == 1 ? '' : 's'}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                      );
-                    },
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.tonalIcon(
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => _MyPostsPage(
+                                  posts: posts,
+                                  signedInUid: signedInUid,
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.article_outlined),
+                          label: const Text('View all posts'),
+                        ),
+                      ),
+                    ],
                   );
                 },
               ),
@@ -758,6 +762,103 @@ class _SectionCard extends StatelessWidget {
             child,
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Page to display all posts by the current user in a feed-like layout (like LinkedIn)
+class _MyPostsPage extends StatelessWidget {
+  const _MyPostsPage({
+    required this.posts,
+    required this.signedInUid,
+  });
+
+  final FirestorePostsController posts;
+  final String signedInUid;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Your Posts'),
+      ),
+      body: StreamBuilder<List<Post>>(
+        stream: posts.userPostsStream(uid: signedInUid),
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  'Failed to load posts: ${snap.error}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+              ),
+            );
+          }
+
+          if (!snap.hasData) {
+            // Skeleton loading
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              itemCount: 3,
+              itemBuilder: (context, index) => const Padding(
+                padding: EdgeInsets.only(bottom: 16),
+                child: PostCardSkeleton(),
+              ),
+            );
+          }
+
+          final items = snap.data!;
+          if (items.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.article_outlined,
+                    size: 64,
+                    color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No posts yet',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Create your first post from the Feed tab',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: PostCard(
+                  post: items[index],
+                  currentUid: signedInUid,
+                  posts: posts,
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
