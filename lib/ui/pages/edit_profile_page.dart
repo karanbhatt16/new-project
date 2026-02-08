@@ -23,7 +23,6 @@ class EditProfilePage extends StatefulWidget {
 }
 
 class _EditProfilePageState extends State<EditProfilePage> {
-  late final TextEditingController _usernameController;
   late final TextEditingController _bioController;
   late Gender _selectedGender;
   late List<String> _selectedInterests;
@@ -57,18 +56,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   void initState() {
     super.initState();
-    _usernameController = TextEditingController(text: widget.currentUser.username);
     _bioController = TextEditingController(text: widget.currentUser.bio);
     _selectedGender = widget.currentUser.gender;
     _selectedInterests = List<String>.from(widget.currentUser.interests);
 
-    _usernameController.addListener(_onFieldChanged);
     _bioController.addListener(_onFieldChanged);
   }
 
   void _onFieldChanged() {
-    final hasChanges = _usernameController.text != widget.currentUser.username ||
-        _bioController.text != widget.currentUser.bio ||
+    final hasChanges = _bioController.text != widget.currentUser.bio ||
         _selectedGender != widget.currentUser.gender ||
         !_listEquals(_selectedInterests, widget.currentUser.interests);
     
@@ -87,30 +83,30 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   @override
   void dispose() {
-    _usernameController.dispose();
     _bioController.dispose();
     super.dispose();
   }
 
   Future<void> _saveProfile() async {
-    if (_usernameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Username cannot be empty')),
-      );
-      return;
-    }
-
-    await runAsyncAction(context, () async {
+    bool success = false;
+    
+    try {
       await widget.auth.updateProfile(
         uid: widget.currentUser.uid,
-        username: _usernameController.text,
         gender: _selectedGender,
         bio: _bioController.text,
         interests: _selectedInterests,
       );
-    });
+      success = true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
+      }
+    }
 
-    if (mounted) {
+    if (success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Profile updated successfully')),
       );
@@ -222,7 +218,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               ),
               const SizedBox(height: 24),
 
-              // Username Field
+              // Username Field (read-only - auto-generated from email)
               Text(
                 'Username',
                 style: theme.textTheme.titleSmall?.copyWith(
@@ -231,16 +227,42 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ),
               ),
               const SizedBox(height: 8),
-              TextField(
-                controller: _usernameController,
-                decoration: InputDecoration(
-                  hintText: 'Enter your username',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  prefixIcon: const Icon(Icons.person_outline),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                decoration: BoxDecoration(
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
+                  borderRadius: BorderRadius.circular(12),
+                  color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
                 ),
-                textInputAction: TextInputAction.next,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.person_outline,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        user.username,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.lock_outline,
+                      size: 18,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Username is auto-generated and cannot be changed',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 24),
 

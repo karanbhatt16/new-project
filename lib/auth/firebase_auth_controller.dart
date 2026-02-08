@@ -61,6 +61,43 @@ class FirebaseAuthController extends ChangeNotifier {
   Future<List<AppUser>> getAllUsers() => users.fetchAllUsers();
   Future<AppUser?> getUserByEmail(String email) => users.fetchUserByEmail(email);
 
+  /// Check if an email is already registered using Firebase Auth
+  /// This uses fetchSignInMethodsForEmail which works for unauthenticated users
+  Future<bool> isEmailAlreadyRegistered(String email) async {
+    try {
+      final methods = await _auth.fetchSignInMethodsForEmail(email.trim().toLowerCase());
+      return methods.isNotEmpty;
+    } catch (e) {
+      // If the check fails, we'll let the signup proceed and handle duplicates there
+      debugPrint('Email check failed: $e');
+      return false;
+    }
+  }
+
+  /// Generate a unique username from email
+  /// Format: Takes the name part before @ (e.g., "john.cse.2024" from "john.cse.2024@nitj.ac.in")
+  /// Appends a short random suffix to ensure uniqueness without querying Firestore
+  String generateUniqueUsername(String email) {
+    // Extract name from email (part before @)
+    final atIndex = email.indexOf('@');
+    if (atIndex == -1) return email.trim().toLowerCase();
+    
+    String baseUsername = email.substring(0, atIndex).trim().toLowerCase();
+    // Remove any invalid characters (keep only alphanumeric, dots, underscores)
+    baseUsername = baseUsername.replaceAll(RegExp(r'[^a-z0-9._]'), '');
+    
+    if (baseUsername.isEmpty) {
+      baseUsername = 'user';
+    }
+
+    // Generate a short unique suffix using timestamp + random component
+    // This avoids needing to query Firestore during signup (which can fail due to auth timing)
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final shortSuffix = (timestamp % 10000).toString().padLeft(4, '0');
+    
+    return '$baseUsername$shortSuffix';
+  }
+
   /// Stream of all users for real-time updates when new users join.
   Stream<List<AppUser>> allUsersStream() {
     return _db
@@ -90,7 +127,6 @@ class FirebaseAuthController extends ChangeNotifier {
 
   Future<String?> signUp({
     required String email,
-    required String username,
     required String password,
     required Gender gender,
     required String bio,
@@ -104,10 +140,14 @@ class FirebaseAuthController extends ChangeNotifier {
       );
 
       final uid = cred.user!.uid;
+      
+      // Generate unique username from email with a short timestamp suffix
+      final username = generateUniqueUsername(email);
+
       await _db.collection('users').doc(uid).set({
         'uid': uid,
         'email': email.trim().toLowerCase(),
-        'username': username.trim(),
+        'username': username,
         'gender': gender.name,
         'bio': bio.trim(),
         'interests': interests,

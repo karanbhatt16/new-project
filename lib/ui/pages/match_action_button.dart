@@ -4,9 +4,18 @@ import 'package:flutter/material.dart';
 
 import '../../social/firestore_social_graph_controller.dart';
 
+/// Optimistic state for match actions
+enum _OptimisticMatchState {
+  none,
+  sendingRequest,  // Optimistically showing "Request sent"
+  accepting,       // Optimistically showing "Matched"
+  breakingUp,      // Optimistically showing available state
+}
+
 /// Widget for consistent match action button states.
 /// Shows different states based on match relationship between users.
-class MatchActionButton extends StatelessWidget {
+/// Now with optimistic updates - UI changes instantly before server confirms.
+class MatchActionButton extends StatefulWidget {
   const MatchActionButton({
     super.key,
     required this.status,
@@ -27,11 +36,120 @@ class MatchActionButton extends StatelessWidget {
   final bool dense;
 
   @override
+  State<MatchActionButton> createState() => _MatchActionButtonState();
+}
+
+class _MatchActionButtonState extends State<MatchActionButton> {
+  _OptimisticMatchState _optimisticState = _OptimisticMatchState.none;
+  bool _isLoading = false;
+
+  // Effective states (combining server state with optimistic state)
+  bool get _effectiveAreMatched {
+    if (_optimisticState == _OptimisticMatchState.accepting) return true;
+    if (_optimisticState == _OptimisticMatchState.breakingUp) return false;
+    return widget.status.areMatched;
+  }
+
+  bool get _effectiveHasOutgoing {
+    if (_optimisticState == _OptimisticMatchState.sendingRequest) return true;
+    if (_optimisticState == _OptimisticMatchState.accepting) return false;
+    return widget.status.hasOutgoingRequest;
+  }
+
+  bool get _effectiveHasIncoming {
+    if (_optimisticState == _OptimisticMatchState.accepting) return false;
+    return widget.status.hasIncomingRequest;
+  }
+
+  Future<void> _handleSendRequest() async {
+    if (_isLoading) return;
+    
+    setState(() {
+      _isLoading = true;
+      _optimisticState = _OptimisticMatchState.sendingRequest;
+    });
+
+    try {
+      widget.onSendRequest().catchError((e) {
+        if (mounted) {
+          setState(() => _optimisticState = _OptimisticMatchState.none);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to send match request: $e')),
+          );
+        }
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _handleAccept() async {
+    if (_isLoading) return;
+    
+    setState(() {
+      _isLoading = true;
+      _optimisticState = _OptimisticMatchState.accepting;
+    });
+
+    try {
+      widget.onAcceptRequest().catchError((e) {
+        if (mounted) {
+          setState(() => _optimisticState = _OptimisticMatchState.none);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to accept match: $e')),
+          );
+        }
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _handleBreakUp() async {
+    if (_isLoading) return;
+    
+    setState(() {
+      _isLoading = true;
+      _optimisticState = _OptimisticMatchState.breakingUp;
+    });
+
+    try {
+      widget.onBreakUp().catchError((e) {
+        if (mounted) {
+          setState(() => _optimisticState = _OptimisticMatchState.none);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to break up: $e')),
+          );
+        }
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  void didUpdateWidget(MatchActionButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Clear optimistic state when server state catches up
+    if (widget.status.areMatched != oldWidget.status.areMatched ||
+        widget.status.hasOutgoingRequest != oldWidget.status.hasOutgoingRequest ||
+        widget.status.hasIncomingRequest != oldWidget.status.hasIncomingRequest) {
+      _optimisticState = _OptimisticMatchState.none;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     // Already matched with this person
-    if (status.areMatched) {
+    if (_effectiveAreMatched) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -52,7 +170,7 @@ class MatchActionButton extends StatelessWidget {
                 const Icon(Icons.favorite, color: Colors.white, size: 20),
                 const SizedBox(width: 8),
                 Text(
-                  dense ? 'Matched ❤️' : 'In a relationship ❤️',
+                  widget.dense ? 'Matched ❤️' : 'In a relationship ❤️',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
@@ -63,8 +181,10 @@ class MatchActionButton extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: () => _confirmBreakUp(context),
-            icon: const Icon(Icons.heart_broken),
+            onPressed: _isLoading ? null : () => _confirmBreakUp(context),
+            icon: _isLoading
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.heart_broken),
             label: const Text('Break Up'),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.red,
@@ -75,11 +195,13 @@ class MatchActionButton extends StatelessWidget {
     }
 
     // I have an incoming match request from this person
-    if (status.hasIncomingRequest) {
+    if (_effectiveHasIncoming) {
       return FilledButton.icon(
-        onPressed: () async => onAcceptRequest(),
-        icon: const Icon(Icons.favorite_border),
-        label: Text(dense ? 'Accept' : 'Accept Match Request'),
+        onPressed: _isLoading ? null : _handleAccept,
+        icon: _isLoading
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            : const Icon(Icons.favorite_border),
+        label: Text(widget.dense ? 'Accept' : 'Accept Match Request'),
         style: FilledButton.styleFrom(
           backgroundColor: Colors.pink,
         ),
@@ -87,25 +209,25 @@ class MatchActionButton extends StatelessWidget {
     }
 
     // I sent a match request to this person (pending)
-    if (status.hasOutgoingRequest) {
+    if (_effectiveHasOutgoing) {
       return FilledButton.tonalIcon(
         onPressed: null,
         icon: const Icon(Icons.hourglass_top),
-        label: Text(dense ? 'Pending' : 'Match Request Sent'),
+        label: Text(widget.dense ? 'Pending' : 'Match Request Sent'),
       );
     }
 
     // I'm already matched with someone else
-    if (status.iAmAlreadyMatched) {
+    if (widget.status.iAmAlreadyMatched) {
       return FilledButton.tonalIcon(
         onPressed: null,
         icon: const Icon(Icons.block),
-        label: Text(dense ? 'You\'re taken' : 'You\'re already in a relationship'),
+        label: Text(widget.dense ? 'You\'re taken' : 'You\'re already in a relationship'),
       );
     }
 
     // They're already matched with someone else
-    if (status.theyAreAlreadyMatched) {
+    if (widget.status.theyAreAlreadyMatched) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -122,9 +244,9 @@ class MatchActionButton extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    theirPartnerUsername != null
-                        ? '${otherUsername ?? 'This user'} is currently matched with $theirPartnerUsername'
-                        : '${otherUsername ?? 'This user'} is already in a relationship',
+                    widget.theirPartnerUsername != null
+                        ? '${widget.otherUsername ?? 'This user'} is currently matched with ${widget.theirPartnerUsername}'
+                        : '${widget.otherUsername ?? 'This user'} is already in a relationship',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: Colors.orange.shade800,
                     ),
@@ -139,9 +261,11 @@ class MatchActionButton extends StatelessWidget {
 
     // Can send a match request
     return FilledButton.icon(
-      onPressed: () async => onSendRequest(),
-      icon: const Icon(Icons.favorite_border),
-      label: Text(dense ? 'Match' : 'Send Match Request'),
+      onPressed: _isLoading ? null : _handleSendRequest,
+      icon: _isLoading
+          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+          : const Icon(Icons.favorite_border),
+      label: Text(widget.dense ? 'Match' : 'Send Match Request'),
       style: FilledButton.styleFrom(
         backgroundColor: Colors.pink,
       ),
@@ -154,7 +278,7 @@ class MatchActionButton extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: const Text('Break Up?'),
         content: Text(
-          'Are you sure you want to break up with ${otherUsername ?? 'your match'}? '
+          'Are you sure you want to break up with ${widget.otherUsername ?? 'your match'}? '
           'This will end your relationship and everyone will be able to see it in your match history.',
         ),
         actions: [
@@ -172,7 +296,7 @@ class MatchActionButton extends StatelessWidget {
     );
 
     if (confirmed == true) {
-      await onBreakUp();
+      await _handleBreakUp();
     }
   }
 }

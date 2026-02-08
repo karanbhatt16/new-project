@@ -72,6 +72,9 @@ dependencies:
   record: ^6.2.0
   path_provider: ^2.1.2
 
+  # Share functionality
+  share_plus: ^10.1.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -95,15 +98,15 @@ flutter_native_splash:
   color_dark: "#1A1118"
   
   # Logo image - your custom splash logo
-  image: assets/splash/splash.png
-  image_dark: assets/splash/splash.png
+  image: assets/splash/splash.jpeg
+  image_dark: assets/splash/splash.jpeg
   
   # Android 12+ adaptive icon settings
   android_12:
     color: "#FF4B6E"
     color_dark: "#1A1118"
-    image: assets/splash/splash.png
-    image_dark: assets/splash/splash.png
+    image: assets/splash/splash.jpeg
+    image_dark: assets/splash/splash.jpeg
   
   # Fullscreen mode for immersive experience
   fullscreen: true
@@ -126,6 +129,7 @@ flutter:
   # Assets
   assets:
     - assets/splash/
+    - assets/sounds/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

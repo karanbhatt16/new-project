@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 import '../../auth/app_user.dart';
@@ -34,11 +35,30 @@ class SwipeDeck extends StatefulWidget {
 class _SwipeDeckState extends State<SwipeDeck> {
   late List<AppUser> _queue;
   bool _busy = false;
+  final AudioPlayer _skipSoundPlayer = AudioPlayer();
+  final AudioPlayer _friendSoundPlayer = AudioPlayer();
 
   @override
   void initState() {
     super.initState();
     _queue = List.of(widget.users);
+  }
+
+  @override
+  void dispose() {
+    _skipSoundPlayer.dispose();
+    _friendSoundPlayer.dispose();
+    super.dispose();
+  }
+
+  void _playSkipSound() {
+    _skipSoundPlayer.stop();
+    _skipSoundPlayer.play(AssetSource('sounds/swipe_next.mpeg'));
+  }
+
+  void _playFriendSound() {
+    _friendSoundPlayer.stop();
+    _friendSoundPlayer.play(AssetSource('sounds/acha_ji.mpeg'));
   }
 
   @override
@@ -154,8 +174,14 @@ class _SwipeDeckState extends State<SwipeDeck> {
                     user: u,
                     mutualInterests: mutual,
                     enabled: !_busy,
-                    onFriend: () => _handleSwipe(u, SwipeAction.friend),
-                    onSkip: () => _handleSwipe(u, SwipeAction.skip),
+                    onFriend: () {
+                      _playFriendSound();
+                      _handleSwipe(u, SwipeAction.friend);
+                    },
+                    onSkip: () {
+                      _playSkipSound();
+                      _handleSwipe(u, SwipeAction.skip);
+                    },
                     onTap: () => widget.onViewProfile(u),
                   ),
                 ),
@@ -283,10 +309,10 @@ class _SwipeableCardState extends State<_SwipeableCard> {
           ? (d) {
               final threshold = size.width * 0.22;
               if (_drag.dx > threshold) {
-                // Swipe right = next/skip.
+                // Swipe right = next/skip
                 widget.onSkip();
               } else if (_drag.dx < -threshold) {
-                // Swipe left = friend request.
+                // Swipe left = friend request
                 widget.onFriend();
               }
               setState(() => _drag = Offset.zero);
@@ -325,44 +351,129 @@ class _ProfileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     final image = user.profileImageBytes == null
         ? null
         : MemoryImage(Uint8List.fromList(user.profileImageBytes!));
+    
+    final hasImage = image != null;
+
+    // Colors that adapt based on whether we have an image or not
+    // With image: always use white text (over dark gradient)
+    // Without image: use theme-aware colors
+    final Color primaryTextColor = hasImage 
+        ? Colors.white 
+        : theme.colorScheme.onSurface;
+    final Color secondaryTextColor = hasImage 
+        ? Colors.white.withValues(alpha: 0.9) 
+        : theme.colorScheme.onSurfaceVariant;
+    final Color chipBgColor = hasImage
+        ? Colors.white.withValues(alpha: 0.15)
+        : (isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.08));
+    final Color chipTextColor = hasImage
+        ? Colors.white
+        : theme.colorScheme.onSurface;
+    final Color chipBorderColor = hasImage
+        ? Colors.white.withValues(alpha: 0.25)
+        : theme.colorScheme.outline.withValues(alpha: 0.3);
 
     return Material(
       color: theme.colorScheme.surface,
       borderRadius: BorderRadius.circular(28),
       clipBehavior: Clip.antiAlias,
+      elevation: isDark ? 8 : 4,
+      shadowColor: isDark ? Colors.black54 : Colors.black26,
       child: InkWell(
         onTap: onTap,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Photo
-            if (image != null)
+            // Photo or beautiful placeholder
+            if (hasImage)
               Image(image: image, fit: BoxFit.cover)
             else
+              // Theme-aware placeholder design
               Container(
-                color: theme.colorScheme.surfaceContainerHighest,
-                child: const Center(child: Icon(Icons.person, size: 88)),
-              ),
-
-            // Gradient for text readability
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0x22000000),
-                    Color(0x00000000),
-                    Color(0xAA000000),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isDark
+                        ? [
+                            theme.colorScheme.surfaceContainerHighest,
+                            theme.colorScheme.surfaceContainerHigh,
+                          ]
+                        : [
+                            theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+                            theme.colorScheme.secondaryContainer.withValues(alpha: 0.5),
+                          ],
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    // Top section with avatar
+                    Expanded(
+                      flex: 3,
+                      child: Center(
+                        child: Container(
+                          width: 120,
+                          height: 120,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: isDark
+                                  ? [
+                                      theme.colorScheme.primary.withValues(alpha: 0.4),
+                                      theme.colorScheme.secondary.withValues(alpha: 0.3),
+                                    ]
+                                  : [
+                                      theme.colorScheme.primary.withValues(alpha: 0.2),
+                                      theme.colorScheme.secondary.withValues(alpha: 0.15),
+                                    ],
+                            ),
+                            border: Border.all(
+                              color: isDark 
+                                  ? theme.colorScheme.outline.withValues(alpha: 0.3)
+                                  : theme.colorScheme.primary.withValues(alpha: 0.3),
+                              width: 3,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.person_rounded,
+                            size: 64,
+                            color: isDark
+                                ? theme.colorScheme.onSurface.withValues(alpha: 0.6)
+                                : theme.colorScheme.primary.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Bottom section reserved for text overlay
+                    const Expanded(flex: 2, child: SizedBox()),
                   ],
-                  stops: [0.0, 0.55, 1.0],
                 ),
               ),
-            ),
+
+            // Gradient for text readability (only when there's an image)
+            if (hasImage)
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0x18000000),
+                      Color(0x00000000),
+                      Color(0x00000000),
+                      Color(0xCC000000),
+                    ],
+                    stops: [0.0, 0.3, 0.5, 1.0],
+                  ),
+                ),
+              ),
 
             // Like/Nope overlay label
             if (overlayLabel != null)
@@ -373,14 +484,18 @@ class _ProfileCard extends StatelessWidget {
                 child: Transform.rotate(
                   angle: overlayLabel == _SwipeLabel.skip ? -0.18 : 0.18,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
+                      color: (overlayLabel == _SwipeLabel.skip
+                              ? Colors.red
+                              : Colors.green)
+                          .withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         width: 3,
                         color: overlayLabel == _SwipeLabel.skip
-                            ? theme.colorScheme.tertiary
-                            : theme.colorScheme.primary,
+                            ? Colors.red
+                            : Colors.green,
                       ),
                     ),
                     child: Text(
@@ -389,89 +504,177 @@ class _ProfileCard extends StatelessWidget {
                         fontWeight: FontWeight.w900,
                         letterSpacing: 2,
                         color: overlayLabel == _SwipeLabel.skip
-                            ? theme.colorScheme.tertiary
-                            : theme.colorScheme.primary,
+                            ? Colors.red
+                            : Colors.green,
                       ),
                     ),
                   ),
                 ),
               ),
 
-            // Bottom profile summary
+            // Bottom profile summary with glassmorphism effect for no-image cards
             Positioned(
-              left: 16,
-              right: 16,
-              bottom: 16,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    user.username,
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    user.bio.isEmpty ? user.gender.label : user.bio,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white.withValues(alpha: 0.92)),
-                  ),
-                  const SizedBox(height: 8),
-                  if (mutualInterests.isNotEmpty) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.secondary.withValues(alpha: 0.22),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                decoration: hasImage
+                    ? null
+                    : BoxDecoration(
+                        color: isDark
+                            ? Colors.black.withValues(alpha: 0.3)
+                            : Colors.white.withValues(alpha: 0.85),
+                        border: Border(
+                          top: BorderSide(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.1)
+                                : Colors.black.withValues(alpha: 0.05),
+                          ),
+                        ),
                       ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.auto_awesome, size: 18, color: Colors.white),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Shared: ${mutualInterests.take(3).join(', ')}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Username with shadow for readability
+                    Text(
+                      user.username,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: primaryTextColor,
+                        fontWeight: FontWeight.w900,
+                        shadows: hasImage
+                            ? [
+                                Shadow(
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                  blurRadius: 8,
+                                ),
+                              ]
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // Bio
+                    Text(
+                      user.bio.isEmpty ? user.gender.label : user.bio,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: secondaryTextColor,
+                        shadows: hasImage
+                            ? [
+                                Shadow(
+                                  color: Colors.black.withValues(alpha: 0.4),
+                                  blurRadius: 4,
+                                ),
+                              ]
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Mutual interests highlight
+                    if (mutualInterests.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? theme.colorScheme.primary.withValues(alpha: 0.25)
+                              : theme.colorScheme.primary.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.auto_awesome,
+                              size: 16,
+                              color: isDark
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                'Shared: ${mutualInterests.take(3).join(', ')}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: isDark
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      Chip(
-                        label: Text(user.gender.label),
-                        backgroundColor: Colors.white.withValues(alpha: 0.15),
-                        labelStyle: const TextStyle(color: Colors.white),
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.25)),
-                      ),
-                      for (final i in user.interests.take(3))
-                        Chip(
-                          label: Text(i),
-                          backgroundColor: Colors.white.withValues(alpha: 0.15),
-                          labelStyle: const TextStyle(color: Colors.white),
-                          side: BorderSide(color: Colors.white.withValues(alpha: 0.25)),
+                          ],
                         ),
+                      ),
+                      const SizedBox(height: 10),
                     ],
-                  ),
-                ],
+                    // Interest chips
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _buildChip(
+                          label: user.gender.label,
+                          icon: Icons.person_outline,
+                          bgColor: chipBgColor,
+                          textColor: chipTextColor,
+                          borderColor: chipBorderColor,
+                        ),
+                        for (final i in user.interests.take(3))
+                          _buildChip(
+                            label: i,
+                            bgColor: chipBgColor,
+                            textColor: chipTextColor,
+                            borderColor: chipBorderColor,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildChip({
+    required String label,
+    IconData? icon,
+    required Color bgColor,
+    required Color textColor,
+    required Color borderColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14, color: textColor),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }

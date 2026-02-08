@@ -259,6 +259,7 @@ class _CurrentMatchCard extends StatelessWidget {
                   partnerName,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
                 subtitle: match.matchedAt != null

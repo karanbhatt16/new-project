@@ -1,16 +1,19 @@
-import 'dart:typed_data';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
+import '../../call/voice_call_controller.dart';
+import '../../chat/e2ee_chat_controller.dart';
+import '../../chat/firestore_chat_controller.dart';
+import '../../notifications/firestore_notifications_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../../posts/firestore_posts_controller.dart';
 import '../../posts/post_models.dart';
 import '../../preferences/theme_preferences.dart';
 import '../../vibeu_app.dart';
 import '../widgets/async_action.dart';
+import '../widgets/cached_avatar.dart';
 import '_post_widgets.dart';
 import 'edit_profile_page.dart';
 import 'friends_list_page.dart';
@@ -25,6 +28,10 @@ class ProfilePage extends StatelessWidget {
     required this.auth,
     required this.social,
     required this.posts,
+    this.chat,
+    this.e2eeChat,
+    this.notifications,
+    this.callController,
   });
 
   final String signedInUid;
@@ -33,6 +40,10 @@ class ProfilePage extends StatelessWidget {
   final FirebaseAuthController auth;
   final FirestoreSocialGraphController social;
   final FirestorePostsController posts;
+  final FirestoreChatController? chat;
+  final E2eeChatController? e2eeChat;
+  final FirestoreNotificationsController? notifications;
+  final VoiceCallController? callController;
 
   @override
   Widget build(BuildContext context) {
@@ -112,22 +123,10 @@ class ProfilePage extends StatelessWidget {
                                 color: theme.colorScheme.surface,
                               ),
                               padding: const EdgeInsets.all(3),
-                              child: ClipOval(
-                                child: me?.profileImageBytes != null
-                                    ? Image.memory(
-                                        Uint8List.fromList(me!.profileImageBytes!),
-                                        fit: BoxFit.cover,
-                                        width: 90,
-                                        height: 90,
-                                      )
-                                    : Container(
-                                        color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                                        child: Icon(
-                                          Icons.person_rounded,
-                                          size: 50,
-                                          color: theme.colorScheme.primary.withValues(alpha: 0.5),
-                                        ),
-                                      ),
+                              child: CachedAvatar(
+                                imageBytes: me?.profileImageBytes,
+                                radius: 45,
+                                fallbackIconSize: 50,
                               ),
                             ),
                           ),
@@ -273,6 +272,10 @@ class ProfilePage extends StatelessWidget {
                             signedInUid: signedInUid,
                             auth: auth,
                             social: social,
+                            chat: chat,
+                            e2eeChat: e2eeChat,
+                            notifications: notifications,
+                            callController: callController,
                           ),
                         ),
                       );
@@ -334,15 +337,11 @@ class ProfilePage extends StatelessWidget {
                               ),
                               child: Row(
                                 children: [
-                                  CircleAvatar(
+                                  CachedAvatar(
+                                    imageBytes: partner?.profileImageBytes,
                                     radius: 24,
                                     backgroundColor: Colors.pink.shade100,
-                                    backgroundImage: partner?.profileImageBytes != null
-                                        ? MemoryImage(Uint8List.fromList(partner!.profileImageBytes!))
-                                        : null,
-                                    child: partner?.profileImageBytes == null
-                                        ? Icon(Icons.favorite, color: Colors.pink.shade400)
-                                        : null,
+                                    fallbackIcon: Icons.favorite,
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(

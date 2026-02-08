@@ -4,9 +4,13 @@ import 'package:flutter/material.dart';
 
 import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
+import '../../call/voice_call_controller.dart';
+import '../../chat/e2ee_chat_controller.dart';
+import '../../chat/firestore_chat_controller.dart';
+import '../../notifications/firestore_notifications_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
-import '../widgets/async_action.dart';
 import '../widgets/async_error_view.dart';
+import 'chat_thread_page.dart';
 import 'user_profile_page.dart';
 
 class FriendsListPage extends StatefulWidget {
@@ -15,11 +19,19 @@ class FriendsListPage extends StatefulWidget {
     required this.signedInUid,
     required this.auth,
     required this.social,
+    this.chat,
+    this.e2eeChat,
+    this.notifications,
+    this.callController,
   });
 
   final String signedInUid;
   final FirebaseAuthController auth;
   final FirestoreSocialGraphController social;
+  final FirestoreChatController? chat;
+  final E2eeChatController? e2eeChat;
+  final FirestoreNotificationsController? notifications;
+  final VoiceCallController? callController;
 
   @override
   State<FriendsListPage> createState() => _FriendsListPageState();
@@ -32,6 +44,50 @@ class _FriendsListPageState extends State<FriendsListPage> {
   void dispose() {
     _search.dispose();
     super.dispose();
+  }
+
+  /// Opens a chat with the given friend.
+  /// Returns true if chat was opened, false if required controllers are missing.
+  Future<void> _openChat(
+    BuildContext context,
+    String currentUserUid,
+    AppUser friend,
+    FirebaseAuthController auth,
+    FirestoreChatController chat,
+    E2eeChatController e2eeChat,
+    FirestoreSocialGraphController social,
+    FirestoreNotificationsController notifications,
+    VoiceCallController callController,
+  ) async {
+    // Get current user profile
+    final currentUser = await auth.publicProfileByUid(currentUserUid);
+    if (currentUser == null || !context.mounted) return;
+
+    // Get or create thread
+    final thread = await chat.getOrCreateThread(
+      myUid: currentUserUid,
+      myEmail: currentUser.email,
+      otherUid: friend.uid,
+      otherEmail: friend.email,
+    );
+
+    if (!context.mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatThreadPage(
+          currentUser: currentUser,
+          otherUser: friend,
+          thread: thread,
+          chat: chat,
+          e2eeChat: e2eeChat,
+          social: social,
+          notifications: notifications,
+          callController: callController,
+          isMatchChat: false,
+        ),
+      ),
+    );
   }
 
   /// Check if two users are opposite gender (male<->female only)
@@ -122,6 +178,22 @@ class _FriendsListPageState extends State<FriendsListPage> {
                               social: widget.social,
                               auth: widget.auth,
                               canMatch: canMatch,
+                              onMessage: (widget.chat != null && 
+                                          widget.e2eeChat != null && 
+                                          widget.notifications != null && 
+                                          widget.callController != null)
+                                  ? () => _openChat(
+                                        context,
+                                        widget.signedInUid,
+                                        u,
+                                        widget.auth,
+                                        widget.chat!,
+                                        widget.e2eeChat!,
+                                        widget.social,
+                                        widget.notifications!,
+                                        widget.callController!,
+                                      )
+                                  : null,
                             );
                           },
                         );
@@ -146,6 +218,7 @@ class _FriendTile extends StatelessWidget {
     required this.social,
     required this.auth,
     required this.canMatch,
+    this.onMessage,
   });
 
   final AppUser friend;
@@ -153,6 +226,7 @@ class _FriendTile extends StatelessWidget {
   final FirestoreSocialGraphController social;
   final FirebaseAuthController auth;
   final bool canMatch;
+  final VoidCallback? onMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -181,6 +255,7 @@ class _FriendTile extends StatelessWidget {
             user: friend,
             social: social,
             auth: auth,
+            onMessage: onMessage,
           ),
         ),
       ),
@@ -188,9 +263,17 @@ class _FriendTile extends StatelessWidget {
   }
 }
 
+/// Optimistic state for match actions
+enum _OptimisticMatchState {
+  none,
+  sending,    // Optimistically showing "Request pending"
+  accepting,  // Optimistically showing "Matched"
+}
+
 /// Shows a heart icon button for sending match requests to friends.
 /// Only shows for users who are not already matched.
-class _MatchActionIcon extends StatelessWidget {
+/// Now with optimistic UI - changes appear instantly before server confirms.
+class _MatchActionIcon extends StatefulWidget {
   const _MatchActionIcon({
     required this.friendUid,
     required this.friendUsername,
@@ -204,12 +287,66 @@ class _MatchActionIcon extends StatelessWidget {
   final FirestoreSocialGraphController social;
 
   @override
+  State<_MatchActionIcon> createState() => _MatchActionIconState();
+}
+
+class _MatchActionIconState extends State<_MatchActionIcon> {
+  _OptimisticMatchState _optimisticState = _OptimisticMatchState.none;
+
+  void _handleSendRequest() {
+    setState(() => _optimisticState = _OptimisticMatchState.sending);
+    
+    widget.social.sendMatchRequest(
+      fromUid: widget.currentUserUid, 
+      toUid: widget.friendUid,
+    ).catchError((e) {
+      if (mounted) {
+        setState(() => _optimisticState = _OptimisticMatchState.none);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send request: $e')),
+        );
+      }
+    });
+  }
+
+  void _handleAcceptRequest() {
+    setState(() => _optimisticState = _OptimisticMatchState.accepting);
+    
+    widget.social.acceptMatchRequest(
+      toUid: widget.currentUserUid, 
+      fromUid: widget.friendUid,
+    ).catchError((e) {
+      if (mounted) {
+        setState(() => _optimisticState = _OptimisticMatchState.none);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to accept: $e')),
+        );
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<MatchStatus>(
-      stream: social.matchStatusStream(myUid: currentUserUid, otherUid: friendUid),
+      stream: widget.social.matchStatusStream(myUid: widget.currentUserUid, otherUid: widget.friendUid),
       builder: (context, snap) {
-        // Show loading indicator while waiting
-        if (snap.connectionState == ConnectionState.waiting) {
+        // Clear optimistic state when server catches up
+        if (snap.hasData) {
+          final status = snap.data!;
+          if (_optimisticState == _OptimisticMatchState.sending && status.hasOutgoingRequest) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _optimisticState = _OptimisticMatchState.none);
+            });
+          }
+          if (_optimisticState == _OptimisticMatchState.accepting && status.areMatched) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _optimisticState = _OptimisticMatchState.none);
+            });
+          }
+        }
+
+        // Show loading indicator while waiting for initial data
+        if (snap.connectionState == ConnectionState.waiting && _optimisticState == _OptimisticMatchState.none) {
           return SizedBox(
             width: 40,
             height: 40,
@@ -224,47 +361,44 @@ class _MatchActionIcon extends StatelessWidget {
         }
 
         // Show error state or default icon if stream has error
-        if (snap.hasError) {
+        if (snap.hasError && _optimisticState == _OptimisticMatchState.none) {
           return Icon(Icons.favorite_border, color: Colors.pink.shade300);
         }
 
         final status = snap.data;
-        if (status == null) {
-          // Default: show the send match request button
-          return IconButton(
-            icon: Icon(Icons.favorite_border, color: Colors.pink.shade300),
-            tooltip: 'Send match request to $friendUsername',
-            onPressed: () => _sendMatchRequest(context),
-          );
-        }
+        
+        // Apply optimistic state
+        final effectiveAreMatched = _optimisticState == _OptimisticMatchState.accepting || (status?.areMatched ?? false);
+        final effectiveHasOutgoing = _optimisticState == _OptimisticMatchState.sending || (status?.hasOutgoingRequest ?? false);
+        final effectiveHasIncoming = _optimisticState == _OptimisticMatchState.none && (status?.hasIncomingRequest ?? false);
 
         // Already matched with this person
-        if (status.areMatched) {
+        if (effectiveAreMatched) {
           return Tooltip(
-            message: 'You are matched with $friendUsername',
+            message: 'You are matched with ${widget.friendUsername}',
             child: Icon(Icons.favorite, color: Colors.pink.shade400),
           );
         }
 
-        // I have an incoming request from them
-        if (status.hasIncomingRequest) {
-          return IconButton(
-            icon: Icon(Icons.favorite, color: Colors.pink.shade300),
-            tooltip: 'Accept match request from $friendUsername',
-            onPressed: () => _acceptMatchRequest(context),
-          );
-        }
-
-        // I sent a request to them (pending)
-        if (status.hasOutgoingRequest) {
+        // I sent a request to them (pending) - check this before incoming
+        if (effectiveHasOutgoing) {
           return Tooltip(
             message: 'Match request pending',
             child: Icon(Icons.hourglass_top, color: Colors.grey.shade400),
           );
         }
 
+        // I have an incoming request from them
+        if (effectiveHasIncoming) {
+          return IconButton(
+            icon: Icon(Icons.favorite, color: Colors.pink.shade300),
+            tooltip: 'Accept match request from ${widget.friendUsername}',
+            onPressed: _handleAcceptRequest,
+          );
+        }
+
         // I'm already matched with someone else
-        if (status.iAmAlreadyMatched) {
+        if (status?.iAmAlreadyMatched ?? false) {
           return Tooltip(
             message: 'You\'re already in a relationship',
             child: Icon(Icons.favorite_border, color: Colors.grey.shade300),
@@ -272,9 +406,9 @@ class _MatchActionIcon extends StatelessWidget {
         }
 
         // They're already matched with someone else
-        if (status.theyAreAlreadyMatched) {
+        if (status?.theyAreAlreadyMatched ?? false) {
           return Tooltip(
-            message: '$friendUsername is already in a relationship',
+            message: '${widget.friendUsername} is already in a relationship',
             child: Icon(Icons.heart_broken, color: Colors.grey.shade400),
           );
         }
@@ -282,26 +416,10 @@ class _MatchActionIcon extends StatelessWidget {
         // Can send match request
         return IconButton(
           icon: Icon(Icons.favorite_border, color: Colors.pink.shade300),
-          tooltip: 'Send match request to $friendUsername',
-          onPressed: () => _sendMatchRequest(context),
+          tooltip: 'Send match request to ${widget.friendUsername}',
+          onPressed: _handleSendRequest,
         );
       },
-    );
-  }
-
-  Future<void> _sendMatchRequest(BuildContext context) async {
-    await runAsyncAction(
-      context,
-      () => social.sendMatchRequest(fromUid: currentUserUid, toUid: friendUid),
-      successMessage: 'Match request sent to $friendUsername!',
-    );
-  }
-
-  Future<void> _acceptMatchRequest(BuildContext context) async {
-    await runAsyncAction(
-      context,
-      () => social.acceptMatchRequest(toUid: currentUserUid, fromUid: friendUid),
-      successMessage: 'You matched with $friendUsername! 🎉',
     );
   }
 }

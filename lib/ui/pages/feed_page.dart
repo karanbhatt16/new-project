@@ -1,19 +1,57 @@
 import 'package:flutter/material.dart';
 
+import '../../auth/firebase_auth_controller.dart';
 import '../../posts/firestore_posts_controller.dart';
+import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_error_view.dart';
 import '_post_widgets.dart';
 import 'create_post_page.dart';
 
-class FeedPage extends StatelessWidget {
+class FeedPage extends StatefulWidget {
   const FeedPage({
     super.key,
     required this.currentUid,
     required this.posts,
+    this.auth,
+    this.social,
   });
 
   final String currentUid;
   final FirestorePostsController posts;
+  final FirebaseAuthController? auth;
+  final FirestoreSocialGraphController? social;
+
+  @override
+  State<FeedPage> createState() => FeedPageState();
+}
+
+class FeedPageState extends State<FeedPage> {
+  final ScrollController _scrollController = ScrollController();
+
+  /// Scrolls to the top of the feed with animation
+  void scrollToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onRefresh() async {
+    // The stream will automatically update, but we add a small delay
+    // to show the refresh indicator properly
+    await Future.delayed(const Duration(milliseconds: 500));
+    // Force rebuild by calling setState
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,8 +89,8 @@ class FeedPage extends StatelessWidget {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => CreatePostPage(
-                    currentUid: currentUid,
-                    posts: posts,
+                    currentUid: widget.currentUid,
+                    posts: widget.posts,
                   ),
                 ),
               );
@@ -81,7 +119,7 @@ class FeedPage extends StatelessWidget {
         ),
       ),
       body: StreamBuilder(
-        stream: posts.postsStream(),
+        stream: widget.posts.postsStream(),
         builder: (context, snap) {
           if (snap.hasError) {
             return AsyncErrorView(error: snap.error!);
@@ -106,19 +144,29 @@ class FeedPage extends StatelessWidget {
             return _buildEmptyState(theme, isDark, context);
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-            itemCount: items.length,
-            itemBuilder: (context, index) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: PostCard(
-                  post: items[index],
-                  currentUid: currentUid,
-                  posts: posts,
-                ),
-              );
-            },
+          return RefreshIndicator(
+            onRefresh: _onRefresh,
+            color: theme.colorScheme.primary,
+            backgroundColor: theme.colorScheme.surface,
+            child: ListView.builder(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              cacheExtent: 800, // Cache more items for smoother scrolling
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: PostCard(
+                    post: items[index],
+                    currentUid: widget.currentUid,
+                    posts: widget.posts,
+                    auth: widget.auth,
+                    social: widget.social,
+                  ),
+                );
+              },
+            ),
           );
         },
       ),
@@ -165,8 +213,8 @@ class FeedPage extends StatelessWidget {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => CreatePostPage(
-                      currentUid: currentUid,
-                      posts: posts,
+                      currentUid: widget.currentUid,
+                      posts: widget.posts,
                     ),
                   ),
                 );

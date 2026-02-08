@@ -260,11 +260,12 @@ class FirestoreSocialGraphController {
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    await _notifications.create(
+    // Fire and forget - don't block UI for notification creation
+    unawaited(_notifications.create(
       toUid: toUid,
       fromUid: fromUid,
       type: NotificationType.friendRequestSent, // reuse for now; consider a new type
-    );
+    ));
   }
 
   Future<void> acceptMatchRequest({required String toUid, required String fromUid}) async {
@@ -470,33 +471,36 @@ class FirestoreSocialGraphController {
       });
     });
 
-    await _notifications.create(
+    // Fire and forget - don't block UI for notification creation
+    unawaited(_notifications.create(
       toUid: toUid,
       fromUid: fromUid,
       type: NotificationType.friendRequestSent,
-    );
+    ));
   }
 
   Future<void> cancelOutgoing({required String fromUid, required String toUid}) async {
     final ref = _db.collection('friend_requests').doc(requestId(fromUid, toUid));
     await ref.set({'status': 'cancelled', 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
 
-    await _notifications.create(
+    // Fire and forget - don't block UI for notification creation
+    unawaited(_notifications.create(
       toUid: toUid,
       fromUid: fromUid,
       type: NotificationType.friendRequestCancelled,
-    );
+    ));
   }
 
   Future<void> declineIncoming({required String toUid, required String fromUid}) async {
     final ref = _db.collection('friend_requests').doc(requestId(fromUid, toUid));
     await ref.set({'status': 'declined', 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
 
-    await _notifications.create(
+    // Fire and forget - don't block UI for notification creation
+    unawaited(_notifications.create(
       toUid: fromUid,
       fromUid: toUid,
       type: NotificationType.friendRequestDeclined,
-    );
+    ));
   }
 
   Future<void> acceptIncoming({required String toUid, required String fromUid}) async {
@@ -515,11 +519,12 @@ class FirestoreSocialGraphController {
       tx.set(bRef, {'friendUid': toUid, 'createdAt': FieldValue.serverTimestamp()});
     });
 
-    await _notifications.create(
+    // Fire and forget - don't block UI for notification creation
+    unawaited(_notifications.create(
       toUid: fromUid,
       fromUid: toUid,
       type: NotificationType.friendRequestAccepted,
-    );
+    ));
   }
 
   Stream<FriendStatus> friendStatusStream({required String myUid, required String otherUid}) {
@@ -575,6 +580,56 @@ class FirestoreSocialGraphController {
   Future<int> friendsCount({required String uid}) async {
     final snap = await _db.collection('users').doc(uid).collection('friends').get();
     return snap.size;
+  }
+
+  /// Block a user. Removes friendship and adds to blocked list.
+  /// Blocked users cannot chat with the blocker.
+  Future<void> blockUser({required String blockerUid, required String blockedUid}) async {
+    final blockerFriendRef = _db.collection('users').doc(blockerUid).collection('friends').doc(blockedUid);
+    final blockedFriendRef = _db.collection('users').doc(blockedUid).collection('friends').doc(blockerUid);
+    final blockRef = _db.collection('users').doc(blockerUid).collection('blocked').doc(blockedUid);
+
+    await _db.runTransaction((tx) async {
+      // Remove from friends (both sides)
+      tx.delete(blockerFriendRef);
+      tx.delete(blockedFriendRef);
+      
+      // Add to blocker's blocked list
+      tx.set(blockRef, {
+        'blockedUid': blockedUid,
+        'blockedAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
+  /// Unblock a user.
+  Future<void> unblockUser({required String blockerUid, required String blockedUid}) async {
+    await _db.collection('users').doc(blockerUid).collection('blocked').doc(blockedUid).delete();
+  }
+
+  /// Check if a user is blocked by another user.
+  Future<bool> isBlocked({required String blockerUid, required String blockedUid}) async {
+    final doc = await _db.collection('users').doc(blockerUid).collection('blocked').doc(blockedUid).get();
+    return doc.exists;
+  }
+
+  /// Check if either user has blocked the other (for chat access).
+  Future<bool> isBlockedEitherWay({required String userAUid, required String userBUid}) async {
+    final aBlockedB = await _db.collection('users').doc(userAUid).collection('blocked').doc(userBUid).get();
+    if (aBlockedB.exists) return true;
+    
+    final bBlockedA = await _db.collection('users').doc(userBUid).collection('blocked').doc(userAUid).get();
+    return bBlockedA.exists;
+  }
+
+  /// Stream of blocked user IDs for a user.
+  Stream<List<String>> blockedUsersStream({required String uid}) {
+    return _db
+        .collection('users')
+        .doc(uid)
+        .collection('blocked')
+        .snapshots()
+        .map((snap) => snap.docs.map((doc) => doc.id).toList());
   }
 
   /// Fetches the set of friends for a user (one-time fetch, not a stream).

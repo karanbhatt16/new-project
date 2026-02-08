@@ -190,10 +190,16 @@ class FirestorePostsController {
       }, SetOptions(merge: true));
     });
 
-    // Auto-flag after 5 reports (can tune later).
+    // Check report count and take action
     final updated = await postRef.get();
     final rc = (updated.data()?['reportCount'] as int?) ?? 0;
-    if (rc >= 5) {
+    
+    // Auto-delete after 10 reports
+    if (rc >= 10) {
+      await postRef.delete();
+    }
+    // Auto-flag after 5 reports (for manual review)
+    else if (rc >= 5) {
       await postRef.set({
         'status': 'AUTO_FLAGGED',
         'updatedAt': FieldValue.serverTimestamp(),

@@ -9,6 +9,9 @@ import 'pages/messages_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/notifications_page.dart';
 import 'pages/voice_call_page.dart';
+import 'widgets/app_download_banner.dart';
+
+import '../games/games_hub_page.dart';
 
 import '../auth/firebase_auth_controller.dart';
 import '../call/call_models.dart';
@@ -66,6 +69,9 @@ class _AppShellState extends State<AppShell> {
   late final VoiceCallController _callController;
   late final FirestoreCallSignaling _callSignaling;
   bool _isHandlingCall = false;
+
+  // GlobalKey for FeedPage to support scroll-to-top
+  final GlobalKey<FeedPageState> _feedPageKey = GlobalKey<FeedPageState>();
 
   @override
   void initState() {
@@ -259,9 +265,10 @@ class _AppShellState extends State<AppShell> {
     super.dispose();
   }
 
-  // Tinder-like nav: Match (swipe) first, then Feed, Chats, Profile.
+  // Tinder-like nav: Match (swipe) first, then Games, Feed, Chats, Profile.
   static const _destinations = <_DestinationSpec>[
     _DestinationSpec('Match', Icons.local_fire_department_outlined, Icons.local_fire_department),
+    _DestinationSpec('Games', Icons.sports_esports_outlined, Icons.sports_esports),
     _DestinationSpec('Feed', Icons.grid_view_outlined, Icons.grid_view),
     _DestinationSpec('Chats', Icons.chat_bubble_outline, Icons.chat_bubble),
     _DestinationSpec('Profile', Icons.person_outline, Icons.person),
@@ -317,7 +324,8 @@ class _AppShellState extends State<AppShell> {
 
     final isDark = theme.brightness == Brightness.dark;
     
-    return Scaffold(
+    return AppDownloadBanner(
+      child: Scaffold(
         extendBody: true,
         appBar: AppBar(
         elevation: 0,
@@ -454,10 +462,17 @@ class _AppShellState extends State<AppShell> {
                         selectedIcon: _destinations[i].selectedIcon,
                         label: _destinations[i].label,
                         isSelected: _index == i,
-                        showBadge: i == 2 && hasUnreadMessages,
+                        showBadge: i == 3 && hasUnreadMessages, // Chats is now index 3
                         theme: theme,
                         isDark: isDark,
-                        onTap: () => setState(() => _index = i),
+                        onTap: () {
+                          if (_index == i && i == 2) {
+                            // If Feed tab is already selected, scroll to top (Feed is now index 2)
+                            _feedPageKey.currentState?.scrollToTop();
+                          } else {
+                            setState(() => _index = i);
+                          }
+                        },
                       ),
                   ],
                 ),
@@ -465,6 +480,7 @@ class _AppShellState extends State<AppShell> {
             ),
           );
         },
+      ),
       ),
     );
   }
@@ -553,11 +569,29 @@ class _AppShellState extends State<AppShell> {
           social: widget.social,
         );
       case 1:
-        return FeedPage(
-          currentUid: widget.signedInUid,
-          posts: widget.posts,
+        return FutureBuilder(
+          future: widget.auth.publicProfileByUid(widget.signedInUid),
+          builder: (context, snapshot) {
+            final gender = snapshot.data?.gender.toString().split('.').last ?? 'male';
+            return GamesHubPage(
+              uid: widget.signedInUid,
+              gender: gender,
+              auth: widget.auth,
+              social: widget.social,
+              chat: widget.chat,
+              showBackButton: false,
+            );
+          },
         );
       case 2:
+        return FeedPage(
+          key: _feedPageKey,
+          currentUid: widget.signedInUid,
+          posts: widget.posts,
+          auth: widget.auth,
+          social: widget.social,
+        );
+      case 3:
         return MessagesPage(
           signedInUid: widget.signedInUid,
           signedInEmail: widget.signedInEmail,
@@ -568,7 +602,7 @@ class _AppShellState extends State<AppShell> {
           notifications: widget.notifications,
           callController: _callController,
         );
-      case 3:
+      case 4:
         return ProfilePage(
           signedInUid: widget.signedInUid,
           signedInEmail: widget.signedInEmail,
@@ -576,6 +610,10 @@ class _AppShellState extends State<AppShell> {
           auth: widget.auth,
           social: widget.social,
           posts: widget.posts,
+          chat: widget.chat,
+          e2eeChat: widget.e2eeChat,
+          notifications: widget.notifications,
+          callController: _callController,
         );
       default:
         return DiscoverPage(
@@ -663,6 +701,11 @@ class _LeftRail extends StatelessWidget {
                         icon: Icon(Icons.local_fire_department_outlined),
                         selectedIcon: Icon(Icons.local_fire_department),
                         label: Text('Match'),
+                      ),
+                      const NavigationRailDestination(
+                        icon: Icon(Icons.sports_esports_outlined),
+                        selectedIcon: Icon(Icons.sports_esports),
+                        label: Text('Games'),
                       ),
                       const NavigationRailDestination(
                         icon: Icon(Icons.grid_view_outlined),

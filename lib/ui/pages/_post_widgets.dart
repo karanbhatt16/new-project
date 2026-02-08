@@ -1,13 +1,19 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
 
+import '../../auth/app_user.dart';
+import '../../auth/firebase_auth_controller.dart';
 import '../../posts/firestore_posts_controller.dart';
 import '../../posts/post_models.dart';
+import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_action.dart';
+import '../widgets/cached_avatar.dart';
 import '../widgets/skeleton_widgets.dart';
 import 'post_image_widget.dart';
+import 'user_profile_page.dart';
 
 export '../widgets/skeleton_widgets.dart' show PostCardSkeleton, CommentSkeleton;
 
@@ -18,11 +24,15 @@ class PostCard extends StatefulWidget {
     required this.post,
     required this.currentUid,
     required this.posts,
+    this.auth,
+    this.social,
   });
 
   final Post post;
   final String currentUid;
   final FirestorePostsController posts;
+  final FirebaseAuthController? auth;
+  final FirestoreSocialGraphController? social;
 
   @override
   State<PostCard> createState() => _PostCardState();
@@ -39,6 +49,28 @@ class _PostCardState extends State<PostCard> {
     final post = widget.post;
     return (post.imageUrl != null && post.imageUrl!.isNotEmpty) ||
            (post.imagePath != null && post.imagePath!.isNotEmpty);
+  }
+
+  Future<void> _openUserProfile(BuildContext context, String uid) async {
+    // Don't open profile if auth/social controllers are not available
+    if (widget.auth == null || widget.social == null) return;
+    
+    // Don't navigate to own profile from posts
+    if (uid == widget.currentUid) return;
+
+    final user = await widget.auth!.publicProfileByUid(uid);
+    if (user == null || !context.mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => UserProfilePage(
+          currentUserUid: widget.currentUid,
+          user: user,
+          social: widget.social!,
+          auth: widget.auth,
+        ),
+      ),
+    );
   }
 
   void _handleLikeTap(bool currentLiked) async {
@@ -93,32 +125,35 @@ class _PostCardState extends State<PostCard> {
                 final data = snap.data?.data();
                 final username = (data?['username'] as String?) ?? 'Unknown';
 
-                MemoryImage? avatar;
+                List<int>? avatarBytes;
                 final b64 = data?['profileImageB64'] as String?;
                 if (b64 != null && b64.isNotEmpty) {
                   try {
-                    avatar = MemoryImage(base64Decode(b64));
+                    avatarBytes = base64Decode(b64);
                   } catch (_) {
-                    avatar = null;
+                    avatarBytes = null;
                   }
                 }
 
-                final initial = (username.isNotEmpty ? username.substring(0, 1) : '?').toUpperCase();
-
                 return Row(
                   children: [
-                    CircleAvatar(
-                      radius: 14,
-                      backgroundImage: avatar,
-                      child: avatar == null ? Text(initial) : null,
+                    GestureDetector(
+                      onTap: () => _openUserProfile(context, widget.post.createdByUid),
+                      child: CachedAvatar(
+                        imageBytes: avatarBytes,
+                        radius: 14,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        username,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                      child: GestureDetector(
+                        onTap: () => _openUserProfile(context, widget.post.createdByUid),
+                        child: Text(
+                          username,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ),
                     if (widget.post.createdByUid == widget.currentUid)
@@ -223,62 +258,99 @@ class _PostCardState extends State<PostCard> {
         post: widget.post,
         currentUid: widget.currentUid,
         posts: widget.posts,
+        auth: widget.auth,
+        social: widget.social,
       ),
     );
   }
 
   Future<void> _showReportDialog(BuildContext context) async {
-    final reasons = <String>['HARASSMENT', 'NUDITY', 'OTHER'];
-    String selected = reasons.first;
-    final details = TextEditingController();
-
     await showDialog<void>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Report post'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: selected,
-                items: [for (final r in reasons) DropdownMenuItem(value: r, child: Text(r))],
-                onChanged: (v) => selected = v ?? reasons.first,
+      builder: (dialogContext) {
+        return _ReportDialog(
+          onReport: (reason, details) {
+            Navigator.of(dialogContext).pop();
+            fireAndForget(
+              runAsyncAction(
+                context,
+                () => widget.posts.reportPost(
+                  postId: widget.post.id,
+                  reportedByUid: widget.currentUid,
+                  reason: reason,
+                  details: details,
+                ),
+                successMessage: 'Reported',
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: details,
-                decoration: const InputDecoration(labelText: 'Details (optional)'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                fireAndForget(
-                  runAsyncAction(
-                    context,
-                    () => widget.posts.reportPost(
-                      postId: widget.post.id,
-                      reportedByUid: widget.currentUid,
-                      reason: selected,
-                      details: details.text.trim().isEmpty ? null : details.text.trim(),
-                    ),
-                    successMessage: 'Reported',
-                  ),
-                );
-              },
-              child: const Text('Report'),
-            ),
-          ],
+            );
+          },
         );
       },
-    ).whenComplete(details.dispose);
+    );
+  }
+}
+
+/// Stateful dialog for reporting posts - handles its own TextEditingController lifecycle
+class _ReportDialog extends StatefulWidget {
+  const _ReportDialog({required this.onReport});
+
+  final void Function(String reason, String? details) onReport;
+
+  @override
+  State<_ReportDialog> createState() => _ReportDialogState();
+}
+
+class _ReportDialogState extends State<_ReportDialog> {
+  final _reasons = <String>['HARASSMENT', 'NUDITY', 'OTHER'];
+  late String _selected;
+  late TextEditingController _detailsController;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = _reasons.first;
+    _detailsController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _detailsController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Report post'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: _selected,
+            items: [for (final r in _reasons) DropdownMenuItem(value: r, child: Text(r))],
+            onChanged: (v) => setState(() => _selected = v ?? _reasons.first),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _detailsController,
+            decoration: const InputDecoration(labelText: 'Details (optional)'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final details = _detailsController.text.trim();
+            widget.onReport(_selected, details.isEmpty ? null : details);
+          },
+          child: const Text('Report'),
+        ),
+      ],
+    );
   }
 }
 
@@ -288,11 +360,15 @@ class _CommentsSheet extends StatefulWidget {
     required this.post,
     required this.currentUid,
     required this.posts,
+    this.auth,
+    this.social,
   });
 
   final Post post;
   final String currentUid;
   final FirestorePostsController posts;
+  final FirebaseAuthController? auth;
+  final FirestoreSocialGraphController? social;
 
   @override
   State<_CommentsSheet> createState() => _CommentsSheetState();
@@ -302,12 +378,38 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   final _commentController = TextEditingController();
   final _focusNode = FocusNode();
   bool _submitting = false;
+  bool _showEmojiPicker = false;
 
   @override
   void dispose() {
     _commentController.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  void _onEmojiSelected(Category? category, Emoji emoji) {
+    final text = _commentController.text;
+    final selection = _commentController.selection;
+    final newText = text.replaceRange(
+      selection.start,
+      selection.end,
+      emoji.emoji,
+    );
+    _commentController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: selection.start + emoji.emoji.length,
+      ),
+    );
+  }
+
+  void _toggleEmojiPicker() {
+    if (_showEmojiPicker) {
+      _focusNode.requestFocus();
+    } else {
+      _focusNode.unfocus();
+    }
+    setState(() => _showEmojiPicker = !_showEmojiPicker);
   }
 
   Future<void> _submitComment() async {
@@ -342,14 +444,26 @@ class _CommentsSheetState extends State<_CommentsSheet> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final screenHeight = MediaQuery.of(context).size.height;
+    
+    // Calculate max height based on keyboard visibility
+    // When keyboard is open, we need less height for the sheet
+    final keyboardOpen = bottomInset > 0;
+    final maxSheetHeight = keyboardOpen 
+        ? screenHeight - bottomInset - MediaQuery.of(context).padding.top - 50
+        : screenHeight * 0.7;
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.7,
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
+    return Padding(
+      // Add padding at the bottom when keyboard is visible
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        constraints: BoxConstraints(maxHeight: maxSheetHeight),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
         children: [
           // Handle bar
           Container(
@@ -453,6 +567,8 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                       currentUid: widget.currentUid,
                       posts: widget.posts,
                       timeAgo: _timeAgo(comment.createdAt),
+                      auth: widget.auth,
+                      social: widget.social,
                     );
                   },
                 );
@@ -460,9 +576,44 @@ class _CommentsSheetState extends State<_CommentsSheet> {
             ),
           ),
 
+          // Emoji picker (shown above input when active)
+          if (_showEmojiPicker)
+            SizedBox(
+              height: 250,
+              child: EmojiPicker(
+                onEmojiSelected: _onEmojiSelected,
+                config: Config(
+                  height: 250,
+                  checkPlatformCompatibility: true,
+                  emojiViewConfig: EmojiViewConfig(
+                    columns: 8,
+                    emojiSizeMax: 28,
+                    verticalSpacing: 0,
+                    horizontalSpacing: 0,
+                    gridPadding: EdgeInsets.zero,
+                    backgroundColor: theme.colorScheme.surface,
+                  ),
+                  categoryViewConfig: CategoryViewConfig(
+                    initCategory: Category.SMILEYS,
+                    backgroundColor: theme.colorScheme.surface,
+                    indicatorColor: theme.colorScheme.primary,
+                    iconColorSelected: theme.colorScheme.primary,
+                    iconColor: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                  bottomActionBarConfig: const BottomActionBarConfig(
+                    enabled: false,
+                  ),
+                  searchViewConfig: SearchViewConfig(
+                    backgroundColor: theme.colorScheme.surface,
+                    buttonIconColor: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+            ),
+
           // Comment input
           Container(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + bottomInset),
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + (keyboardOpen ? 0 : bottomPadding)),
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
               boxShadow: [
@@ -475,10 +626,26 @@ class _CommentsSheetState extends State<_CommentsSheet> {
             ),
             child: Row(
               children: [
+                // Emoji button
+                IconButton(
+                  onPressed: _toggleEmojiPicker,
+                  icon: Icon(
+                    _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions_outlined,
+                    color: _showEmojiPicker 
+                        ? theme.colorScheme.primary 
+                        : theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                  tooltip: _showEmojiPicker ? 'Show keyboard' : 'Add emoji',
+                ),
                 Expanded(
                   child: TextField(
                     controller: _commentController,
                     focusNode: _focusNode,
+                    onTap: () {
+                      if (_showEmojiPicker) {
+                        setState(() => _showEmojiPicker = false);
+                      }
+                    },
                     decoration: InputDecoration(
                       hintText: 'Add a comment...',
                       filled: true,
@@ -512,7 +679,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                   child: IconButton(
                     onPressed: _submitting ? null : _submitComment,
                     icon: _submitting
-                        ? SizedBox(
+                        ? const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
@@ -528,6 +695,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
           ),
         ],
       ),
+      ),
     );
   }
 }
@@ -539,12 +707,35 @@ class _CommentTile extends StatelessWidget {
     required this.currentUid,
     required this.posts,
     required this.timeAgo,
+    this.auth,
+    this.social,
   });
 
   final Comment comment;
   final String currentUid;
   final FirestorePostsController posts;
   final String timeAgo;
+  final FirebaseAuthController? auth;
+  final FirestoreSocialGraphController? social;
+
+  Future<void> _openUserProfile(BuildContext context, String uid) async {
+    if (auth == null || social == null) return;
+    if (uid == currentUid) return;
+
+    final user = await auth!.publicProfileByUid(uid);
+    if (user == null || !context.mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => UserProfilePage(
+          currentUserUid: currentUid,
+          user: user,
+          social: social!,
+          auth: auth,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -557,27 +748,27 @@ class _CommentTile extends StatelessWidget {
         final data = snap.data?.data();
         final username = (data?['username'] as String?) ?? 'Unknown';
 
-        MemoryImage? avatar;
+        List<int>? avatarBytes;
         final b64 = data?['profileImageB64'] as String?;
         if (b64 != null && b64.isNotEmpty) {
           try {
-            avatar = MemoryImage(base64Decode(b64));
+            avatarBytes = base64Decode(b64);
           } catch (_) {
-            avatar = null;
+            avatarBytes = null;
           }
         }
-
-        final initial = (username.isNotEmpty ? username.substring(0, 1) : '?').toUpperCase();
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundImage: avatar,
-                child: avatar == null ? Text(initial, style: const TextStyle(fontSize: 14)) : null,
+              GestureDetector(
+                onTap: () => _openUserProfile(context, comment.authorUid),
+                child: CachedAvatar(
+                  imageBytes: avatarBytes,
+                  radius: 18,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -586,10 +777,13 @@ class _CommentTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          username,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
+                        GestureDetector(
+                          onTap: () => _openUserProfile(context, comment.authorUid),
+                          child: Text(
+                            username,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),

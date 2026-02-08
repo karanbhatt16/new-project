@@ -12,7 +12,7 @@ import '../widgets/async_error_view.dart';
 import '../widgets/skeleton_widgets.dart';
 import 'user_profile_page.dart';
 
-class NotificationsPage extends StatelessWidget {
+class NotificationsPage extends StatefulWidget {
   const NotificationsPage({
     super.key,
     required this.signedInUid,
@@ -27,22 +27,27 @@ class NotificationsPage extends StatelessWidget {
   final FirestoreSocialGraphController social;
 
   @override
+  State<NotificationsPage> createState() => _NotificationsPageState();
+}
+
+class _NotificationsPageState extends State<NotificationsPage> {
+  @override
+  void initState() {
+    super.initState();
+    // Automatically mark all notifications as read when page opens
+    widget.notifications.markAllRead(uid: widget.signedInUid);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Notifications'),
-        actions: [
-          IconButton(
-            tooltip: 'Mark all read',
-            onPressed: () => notifications.markAllRead(uid: signedInUid),
-            icon: const Icon(Icons.done_all),
-          ),
-        ],
       ),
       body: StreamBuilder<List<AppNotification>>(
-        stream: notifications.notificationsStream(uid: signedInUid),
+        stream: widget.notifications.notificationsStream(uid: widget.signedInUid),
         builder: (context, snap) {
           if (snap.hasError) {
             return AsyncErrorView(error: snap.error!);
@@ -70,13 +75,14 @@ class NotificationsPage extends StatelessWidget {
 
           return ListView.separated(
             padding: const EdgeInsets.all(12),
+            cacheExtent: 500, // Cache more items for smoother scrolling
             itemCount: items.length,
             separatorBuilder: (context, index) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final n = items[index];
 
               return FutureBuilder<AppUser?>(
-                future: auth.publicProfileByUid(n.fromUid),
+                future: widget.auth.publicProfileByUid(n.fromUid),
                 builder: (context, uSnap) {
                   final u = uSnap.data;
                   final actorName = u?.username ?? 'Someone';
@@ -121,10 +127,10 @@ class NotificationsPage extends StatelessWidget {
                                     Navigator.of(context).push(
                                       MaterialPageRoute(
                                         builder: (_) => UserProfilePage(
-                                          currentUserUid: signedInUid,
+                                          currentUserUid: widget.signedInUid,
                                           user: u,
-                                          social: social,
-                                          auth: auth,
+                                          social: widget.social,
+                                          auth: widget.auth,
                                         ),
                                       ),
                                     );
@@ -151,13 +157,13 @@ class NotificationsPage extends StatelessWidget {
                                 )
                               : null,
                           onTap: () async {
-                            await notifications.markRead(uid: signedInUid, notificationId: n.id);
+                            await widget.notifications.markRead(uid: widget.signedInUid, notificationId: n.id);
                           },
                         ),
                         // Show action buttons for friend requests
                         if (isFriendRequest && u != null)
                           StreamBuilder<FriendStatus>(
-                            stream: social.friendStatusStream(myUid: signedInUid, otherUid: n.fromUid),
+                            stream: widget.social.friendStatusStream(myUid: widget.signedInUid, otherUid: n.fromUid),
                             builder: (context, statusSnap) {
                               final status = statusSnap.data;
                               // Only show buttons if there's still an incoming request
@@ -176,10 +182,10 @@ class NotificationsPage extends StatelessWidget {
                                           Navigator.of(context).push(
                                             MaterialPageRoute(
                                               builder: (_) => UserProfilePage(
-                                                currentUserUid: signedInUid,
+                                                currentUserUid: widget.signedInUid,
                                                 user: u,
-                                                social: social,
-                                                auth: auth,
+                                                social: widget.social,
+                                                auth: widget.auth,
                                               ),
                                             ),
                                           );
@@ -201,12 +207,12 @@ class NotificationsPage extends StatelessWidget {
                                         onPressed: () => runAsyncAction(
                                           context,
                                           () async {
-                                            await social.acceptIncoming(
-                                              toUid: signedInUid,
+                                            await widget.social.acceptIncoming(
+                                              toUid: widget.signedInUid,
                                               fromUid: n.fromUid,
                                             );
-                                            await notifications.markRead(
-                                              uid: signedInUid,
+                                            await widget.notifications.markRead(
+                                              uid: widget.signedInUid,
                                               notificationId: n.id,
                                             );
                                           },

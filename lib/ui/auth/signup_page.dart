@@ -7,6 +7,7 @@ import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
 import '../onboarding/nitj_email.dart';
 import 'otp_verification_dialog.dart';
+import 'terms_and_conditions_page.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key, required this.controller});
@@ -25,7 +26,6 @@ class _SignupPageState extends State<SignupPage>
   final _profileFormKey = GlobalKey<FormState>();
 
   final _emailController = TextEditingController();
-  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _bioController = TextEditingController();
   final _customInterestController = TextEditingController();
@@ -41,6 +41,7 @@ class _SignupPageState extends State<SignupPage>
   bool _submitting = false;
   String? _error;
   int _currentStep = 0;
+  bool _agreedToTerms = false;
 
   late AnimationController _animController;
   late Animation<double> _fadeIn;
@@ -87,7 +88,6 @@ class _SignupPageState extends State<SignupPage>
     _animController.dispose();
     _pageController.dispose();
     _emailController.dispose();
-    _usernameController.dispose();
     _passwordController.dispose();
     _bioController.dispose();
     _customInterestController.dispose();
@@ -106,8 +106,40 @@ class _SignupPageState extends State<SignupPage>
   Future<void> _nextFromAccount() async {
     if (!_accountFormKey.currentState!.validate()) return;
 
-    // Show OTP verification dialog to verify email
     final email = _emailController.text.trim();
+
+    // Check if email is already registered
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    try {
+      final isRegistered = await widget.controller.isEmailAlreadyRegistered(email);
+      if (isRegistered) {
+        if (mounted) {
+          setState(() {
+            _submitting = false;
+            _error = 'An account with this email already exists. Please log in instead.';
+          });
+        }
+        return;
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _error = 'Failed to check email: $e';
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _submitting = false);
+    }
+
+    // Show OTP verification dialog to verify email
     final verified = await showOtpVerificationDialog(
       context: context,
       email: email,
@@ -138,14 +170,18 @@ class _SignupPageState extends State<SignupPage>
   Future<void> _nextFromProfile() async {
     if (!_profileFormKey.currentState!.validate()) return;
 
+    // Profile picture is mandatory
     if (_profileImage == null) {
       setState(() {
-        _error =
-            'Add a profile photo (recommended). You can also continue without it for now.';
+        _error = 'A profile photo is required to create your account.';
       });
+      return;
     }
 
-    setState(() => _currentStep = 2);
+    setState(() {
+      _error = null;
+      _currentStep = 2;
+    });
     await _pageController.nextPage(
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeOutCubic,
@@ -217,9 +253,11 @@ class _SignupPageState extends State<SignupPage>
 
     await Future<void>.delayed(const Duration(milliseconds: 250));
 
+    final email = _emailController.text.trim();
+
+    // Username is now auto-generated inside signUp after Firebase Auth creates the account
     final err = await widget.controller.signUp(
-      email: _emailController.text,
-      username: _usernameController.text,
+      email: email,
       password: _passwordController.text,
       gender: _gender,
       bio: _bioController.text,
@@ -382,9 +420,10 @@ class _SignupPageState extends State<SignupPage>
                           _AccountStep(
                             formKey: _accountFormKey,
                             emailController: _emailController,
-                            usernameController: _usernameController,
                             passwordController: _passwordController,
                             onNext: _nextFromAccount,
+                            agreedToTerms: _agreedToTerms,
+                            onAgreedToTermsChanged: (value) => setState(() => _agreedToTerms = value),
                           ),
                           _ProfileStep(
                             formKey: _profileFormKey,
@@ -423,16 +462,18 @@ class _AccountStep extends StatefulWidget {
   const _AccountStep({
     required this.formKey,
     required this.emailController,
-    required this.usernameController,
     required this.passwordController,
     required this.onNext,
+    required this.agreedToTerms,
+    required this.onAgreedToTermsChanged,
   });
 
   final GlobalKey<FormState> formKey;
   final TextEditingController emailController;
-  final TextEditingController usernameController;
   final TextEditingController passwordController;
   final VoidCallback onNext;
+  final bool agreedToTerms;
+  final ValueChanged<bool> onAgreedToTermsChanged;
 
   @override
   State<_AccountStep> createState() => _AccountStepState();
@@ -440,14 +481,12 @@ class _AccountStep extends StatefulWidget {
 
 class _AccountStepState extends State<_AccountStep> {
   final _emailFocus = FocusNode();
-  final _usernameFocus = FocusNode();
   final _passwordFocus = FocusNode();
   bool _obscurePassword = true;
 
   @override
   void dispose() {
     _emailFocus.dispose();
-    _usernameFocus.dispose();
     _passwordFocus.dispose();
     super.dispose();
   }
@@ -538,7 +577,7 @@ class _AccountStepState extends State<_AccountStep> {
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
                     autofillHints: const [AutofillHints.email],
-                    onFieldSubmitted: (_) => _usernameFocus.requestFocus(),
+                    onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
                     validator: (v) {
                       final value = (v ?? '').trim();
                       if (value.isEmpty) return 'Please enter your email';
@@ -550,24 +589,13 @@ class _AccountStepState extends State<_AccountStep> {
                     theme: theme,
                     isDark: isDark,
                   ),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    controller: widget.usernameController,
-                    focusNode: _usernameFocus,
-                    label: 'Username',
-                    hint: 'Choose a unique username',
-                    icon: Icons.person_outline,
-                    textInputAction: TextInputAction.next,
-                    autofillHints: const [AutofillHints.username],
-                    onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
-                    validator: (v) {
-                      final value = (v ?? '').trim();
-                      if (value.isEmpty) return 'Please enter a username';
-                      if (value.length < 3) return 'Username must be at least 3 characters';
-                      return null;
-                    },
-                    theme: theme,
-                    isDark: isDark,
+                  const SizedBox(height: 8),
+                  Text(
+                    'Your username will be auto-generated from your email',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                      fontStyle: FontStyle.italic,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   _buildTextField(
@@ -604,10 +632,97 @@ class _AccountStepState extends State<_AccountStep> {
               ),
             ),
 
+            const SizedBox(height: 20),
+
+            // Terms and Conditions checkbox
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: widget.agreedToTerms
+                      ? theme.colorScheme.primary.withValues(alpha: 0.5)
+                      : (isDark
+                          ? Colors.white.withValues(alpha: 0.1)
+                          : Colors.grey.withValues(alpha: 0.15)),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Checkbox(
+                      value: widget.agreedToTerms,
+                      onChanged: (value) {
+                        widget.onAgreedToTermsChanged(value ?? false);
+                      },
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        widget.onAgreedToTermsChanged(!widget.agreedToTerms);
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text.rich(
+                            TextSpan(
+                              text: 'I agree to the ',
+                              style: theme.textTheme.bodyMedium,
+                              children: [
+                                WidgetSpan(
+                                  alignment: PlaceholderAlignment.baseline,
+                                  baseline: TextBaseline.alphabetic,
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => const TermsAndConditionsPage(),
+                                        ),
+                                      );
+                                    },
+                                    child: Text(
+                                      'Terms and Conditions',
+                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                        color: theme.colorScheme.primary,
+                                        fontWeight: FontWeight.w600,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'You must accept to create an account',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
             const SizedBox(height: 24),
 
             FilledButton(
-              onPressed: widget.onNext,
+              onPressed: widget.agreedToTerms ? widget.onNext : null,
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -626,6 +741,18 @@ class _AccountStepState extends State<_AccountStep> {
                 ],
               ),
             ),
+
+            if (!widget.agreedToTerms)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  'Please accept the Terms and Conditions to continue',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -754,7 +881,7 @@ class _ProfileStep extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Add a photo and tell us about yourself',
+              'Add a photo (required) and tell us about yourself',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
@@ -837,10 +964,13 @@ class _ProfileStep extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Tap to add photo',
+              profileImage == null ? 'Tap to add photo (required)' : 'Tap to change photo',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                color: profileImage == null 
+                    ? theme.colorScheme.error.withValues(alpha: 0.8)
+                    : theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                fontWeight: profileImage == null ? FontWeight.w500 : null,
               ),
             ),
 

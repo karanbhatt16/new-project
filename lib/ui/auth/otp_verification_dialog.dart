@@ -212,6 +212,7 @@ class _OtpVerificationDialogState extends State<OtpVerificationDialog>
     return PopScope(
       canPop: false,
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         body: Container(
           width: double.infinity,
           height: double.infinity,
@@ -393,63 +394,74 @@ class _OtpVerificationDialogState extends State<OtpVerificationDialog>
   }
 
   Widget _buildOtpInputs(ThemeData theme, bool isDark) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(6, (index) {
-        return Container(
-          width: 48,
-          height: 56,
-          margin: EdgeInsets.only(
-            left: index == 0 ? 0 : (index == 3 ? 16 : 8),
-          ),
-          child: KeyboardListener(
-            focusNode: FocusNode(),
-            onKeyEvent: (event) => _onKeyPressed(index, event),
-            child: TextField(
-              controller: _otpControllers[index],
-              focusNode: _focusNodes[index],
-              keyboardType: TextInputType.number,
-              textAlign: TextAlign.center,
-              maxLength: 1,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Calculate box width based on available space
+        // 6 boxes + 5 gaps (4 small + 1 large) = 6*width + 4*8 + 1*16 = 6*width + 48
+        final availableWidth = constraints.maxWidth.clamp(0.0, 360.0);
+        final boxWidth = ((availableWidth - 48) / 6).clamp(36.0, 48.0);
+        final boxHeight = boxWidth * 1.15;
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(6, (index) {
+            return Container(
+              width: boxWidth,
+              height: boxHeight,
+              margin: EdgeInsets.only(
+                left: index == 0 ? 0 : (index == 3 ? 12 : 6),
               ),
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-              ],
-              decoration: InputDecoration(
-                counterText: '',
-                filled: true,
-                fillColor: isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.15)
-                        : Colors.grey.withValues(alpha: 0.2),
-                    width: 2,
+              child: KeyboardListener(
+                focusNode: FocusNode(),
+                onKeyEvent: (event) => _onKeyPressed(index, event),
+                child: TextField(
+                  controller: _otpControllers[index],
+                  focusNode: _focusNodes[index],
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  maxLength: 1,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(
-                    color: theme.colorScheme.primary,
-                    width: 2,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  decoration: InputDecoration(
+                    counterText: '',
+                    filled: true,
+                    fillColor: isDark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.15)
+                            : Colors.grey.withValues(alpha: 0.2),
+                        width: 2,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: theme.colorScheme.primary,
+                        width: 2,
+                      ),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
                   ),
+                  onChanged: (value) => _onOtpChanged(index, value),
                 ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 16),
               ),
-              onChanged: (value) => _onOtpChanged(index, value),
-            ),
-          ),
+            );
+          }),
         );
-      }),
+      },
     );
   }
 

@@ -2,10 +2,17 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../widgets/cached_avatar.dart';
+
 import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
+import '../../call/voice_call_controller.dart';
+import '../../chat/e2ee_chat_controller.dart';
+import '../../chat/firestore_chat_controller.dart';
+import '../../notifications/firestore_notifications_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_action.dart';
+import 'chat_thread_page.dart';
 import 'match_action_button.dart';
 import 'match_history_page.dart';
 
@@ -16,137 +23,362 @@ class UserProfilePage extends StatelessWidget {
     required this.user,
     required this.social,
     this.auth,
+    this.chat,
+    this.e2eeChat,
+    this.notifications,
+    this.callController,
+    @Deprecated('Use chat controllers instead') this.onMessage,
   });
 
   final String currentUserUid;
   final AppUser user;
   final FirestoreSocialGraphController social;
   final FirebaseAuthController? auth;
+  final FirestoreChatController? chat;
+  final E2eeChatController? e2eeChat;
+  final FirestoreNotificationsController? notifications;
+  final VoiceCallController? callController;
+  
+  /// Callback to open chat with this user. If null, message button won't be shown.
+  @Deprecated('Use chat controllers instead')
+  final VoidCallback? onMessage;
+
+  /// Check if we can open chat (all required controllers are available)
+  bool get _canOpenChat =>
+      auth != null &&
+      chat != null &&
+      e2eeChat != null &&
+      notifications != null &&
+      callController != null;
+
+  Future<void> _openChat(BuildContext context) async {
+    if (!_canOpenChat) {
+      // Fallback to legacy onMessage callback
+      // ignore: deprecated_member_use_from_same_package
+      onMessage?.call();
+      return;
+    }
+
+    // Get current user profile
+    final currentUser = await auth!.publicProfileByUid(currentUserUid);
+    if (currentUser == null || !context.mounted) return;
+
+    // Get or create thread
+    final thread = await chat!.getOrCreateThread(
+      myUid: currentUserUid,
+      myEmail: currentUser.email,
+      otherUid: user.uid,
+      otherEmail: user.email,
+    );
+
+    if (!context.mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatThreadPage(
+          currentUser: currentUser,
+          otherUser: user,
+          thread: thread,
+          chat: chat!,
+          e2eeChat: e2eeChat!,
+          social: social,
+          notifications: notifications!,
+          callController: callController!,
+          isMatchChat: false,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    // ignore: deprecated_member_use_from_same_package
+    final canMessage = _canOpenChat || onMessage != null;
 
     return Scaffold(
-      appBar: AppBar(title: Text(user.username)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      body: CustomScrollView(
+        slivers: [
+          // Hero header with profile image
+          SliverAppBar(
+            expandedHeight: 280,
+            pinned: true,
+            backgroundColor: theme.colorScheme.surface,
+            flexibleSpace: FlexibleSpaceBar(
+              background: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      theme.colorScheme.primary.withValues(alpha: 0.15),
+                      theme.colorScheme.surface,
+                    ],
+                  ),
+                ),
+                child: SafeArea(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 40),
+                      // Large profile avatar
+                      Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                            width: 4,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                              blurRadius: 20,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: CachedAvatar(
+                          imageBytes: user.profileImageBytes,
+                          radius: 60,
+                          fallbackIconSize: 60,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Username
+                      Text(
+                        user.username,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      // Gender chip
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          user.gender.label,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.onSecondaryContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          
+          // Content
+          SliverPadding(
+            padding: const EdgeInsets.all(16),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                // Action buttons row (Add Friend / Message)
+                _buildActionButtonsSection(context, theme, canMessage),
+                const SizedBox(height: 16),
+                
+                // Bio section
+                _buildBioCard(theme, isDark),
+                const SizedBox(height: 12),
+                
+                // Interests section
+                if (user.interests.isNotEmpty) ...[
+                  _buildInterestsCard(theme),
+                  const SizedBox(height: 12),
+                ],
+                
+                // Friends section (only if we're friends)
+                StreamBuilder<FriendStatus>(
+                  stream: social.friendStatusStream(myUid: currentUserUid, otherUid: user.uid),
+                  builder: (context, snap) {
+                    final s = snap.data;
+                    if (s != null && s.areFriends && auth != null) {
+                      return Column(
+                        children: [
+                          _FriendsSection(
+                            currentUserUid: currentUserUid,
+                            profileUserUid: user.uid,
+                            profileUsername: user.username,
+                            social: social,
+                            auth: auth!,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+                
+                // Match Section - visible to everyone
+                if (auth != null)
+                  StreamBuilder<AppUser?>(
+                    stream: auth!.profileStreamByUid(currentUserUid),
+                    builder: (context, currentUserSnap) {
+                      return _MatchSection(
+                        currentUserUid: currentUserUid,
+                        currentUserGender: currentUserSnap.data?.gender,
+                        profileUser: user,
+                        social: social,
+                        auth: auth,
+                      );
+                    },
+                  )
+                else
+                  _MatchSection(
+                    currentUserUid: currentUserUid,
+                    currentUserGender: null,
+                    profileUser: user,
+                    social: social,
+                    auth: auth,
+                  ),
+              ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtonsSection(BuildContext context, ThemeData theme, bool canMessage) {
+    return StreamBuilder<List<String>>(
+      stream: social.blockedUsersStream(uid: currentUserUid),
+      builder: (context, blockedSnap) {
+        final blockedUsers = blockedSnap.data ?? [];
+        final isBlocked = blockedUsers.contains(user.uid);
+
+        if (isBlocked) {
+          return _BlockedUserCard(
+            friendUsername: user.username,
+            onUnblock: () => social.unblockUser(blockerUid: currentUserUid, blockedUid: user.uid),
+          );
+        }
+
+        return StreamBuilder<FriendStatus>(
+          stream: social.friendStatusStream(myUid: currentUserUid, otherUid: user.uid),
+          builder: (context, snap) {
+            final s = snap.data;
+            if (s == null) {
+              return const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()));
+            }
+
+            return _ProfileActionButtons(
+              status: s,
+              friendUsername: user.username,
+              canMessage: canMessage,
+              onAdd: () => runAsyncAction(
+                context,
+                () => social.sendRequest(fromUid: currentUserUid, toUid: user.uid),
+              ),
+              onCancel: () => runAsyncAction(
+                context,
+                () => social.cancelOutgoing(fromUid: currentUserUid, toUid: user.uid),
+              ),
+              onAccept: () => runAsyncAction(
+                context,
+                () => social.acceptIncoming(toUid: currentUserUid, fromUid: user.uid),
+              ),
+              onDecline: () => runAsyncAction(
+                context,
+                () => social.declineIncoming(toUid: currentUserUid, fromUid: user.uid),
+              ),
+              onBlock: () => social.blockUser(blockerUid: currentUserUid, blockedUid: user.uid),
+              onMessage: () => _openChat(context),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildBioCard(ThemeData theme, bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              CircleAvatar(
-                radius: 34,
-                backgroundImage: user.profileImageBytes == null
-                    ? null
-                    : MemoryImage(Uint8List.fromList(user.profileImageBytes!)),
-                child: user.profileImageBytes == null ? const Icon(Icons.person, size: 36) : null,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  user.username,
-                  style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-                ),
+              Icon(Icons.info_outline, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                'About',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              side: BorderSide(color: theme.colorScheme.outlineVariant),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('About', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 10),
-                  Text(user.bio.isEmpty ? 'No bio yet.' : user.bio),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      Chip(label: Text(user.gender.label)),
-                      for (final i in user.interests) Chip(label: Text(i)),
-                    ],
-                  ),
-                ],
-              ),
+          const SizedBox(height: 12),
+          Text(
+            user.bio.isEmpty ? 'No bio yet.' : user.bio,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: user.bio.isEmpty
+                  ? theme.colorScheme.onSurface.withValues(alpha: 0.5)
+                  : theme.colorScheme.onSurface,
+              fontStyle: user.bio.isEmpty ? FontStyle.italic : FontStyle.normal,
             ),
           ),
-          const SizedBox(height: 12),
-          StreamBuilder<FriendStatus>(
-            stream: social.friendStatusStream(myUid: currentUserUid, otherUid: user.uid),
-            builder: (context, snap) {
-              final s = snap.data;
-              if (s == null) {
-                return const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()));
-              }
+        ],
+      ),
+    );
+  }
 
-              return Column(
-                children: [
-                  _ActionCard(
-                    status: s,
-                    onAdd: () => runAsyncAction(
-                          context,
-                          () => social.sendRequest(fromUid: currentUserUid, toUid: user.uid),
-                        ),
-                    onCancel: () => runAsyncAction(
-                          context,
-                          () => social.cancelOutgoing(fromUid: currentUserUid, toUid: user.uid),
-                        ),
-                    onAccept: () => runAsyncAction(
-                          context,
-                          () => social.acceptIncoming(toUid: currentUserUid, fromUid: user.uid),
-                        ),
-                    onDecline: () => runAsyncAction(
-                          context,
-                          () => social.declineIncoming(toUid: currentUserUid, fromUid: user.uid),
-                        ),
-                  ),
-                  // Show friends list if we're friends with this user
-                  if (s.areFriends && auth != null) ...[
-                    const SizedBox(height: 12),
-                    _FriendsSection(
-                      currentUserUid: currentUserUid,
-                      profileUserUid: user.uid,
-                      profileUsername: user.username,
-                      social: social,
-                      auth: auth!,
-                    ),
-                  ],
-                ],
-              );
-            },
+  Widget _buildInterestsCard(ThemeData theme) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.interests, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Interests',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
-          // Match Section - visible to everyone
-          // Need to get current user's gender for opposite-gender match check
-          if (auth != null)
-            StreamBuilder<AppUser?>(
-              stream: auth!.profileStreamByUid(currentUserUid),
-              builder: (context, currentUserSnap) {
-                return _MatchSection(
-                  currentUserUid: currentUserUid,
-                  currentUserGender: currentUserSnap.data?.gender,
-                  profileUser: user,
-                  social: social,
-                  auth: auth,
-                );
-              },
-            )
-          else
-            _MatchSection(
-              currentUserUid: currentUserUid,
-              currentUserGender: null,
-              profileUser: user,
-              social: social,
-              auth: auth,
-            ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final interest in user.interests)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    interest,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -787,20 +1019,472 @@ class _MatchSection extends StatelessWidget {
   }
 }
 
-class _ActionCard extends StatelessWidget {
-  const _ActionCard({
+/// Optimistic state for friend actions in _ActionCard
+enum _OptimisticState {
+  none,
+  sending,    // Optimistically showing "Request sent"
+  accepting,  // Optimistically showing "Friends"
+}
+
+class _ProfileActionButtons extends StatefulWidget {
+  const _ProfileActionButtons({
     required this.status,
+    required this.friendUsername,
+    required this.canMessage,
     required this.onAdd,
     required this.onCancel,
     required this.onAccept,
     required this.onDecline,
+    required this.onBlock,
+    required this.onMessage,
   });
 
   final FriendStatus status;
+  final String friendUsername;
+  final bool canMessage;
   final VoidCallback onAdd;
   final VoidCallback onCancel;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
+  final Future<void> Function() onBlock;
+  final VoidCallback onMessage;
+
+  @override
+  State<_ProfileActionButtons> createState() => _ProfileActionButtonsState();
+}
+
+class _ProfileActionButtonsState extends State<_ProfileActionButtons> {
+  _OptimisticState _optimisticState = _OptimisticState.none;
+  bool _isBlocking = false;
+  bool _isOpeningChat = false;
+
+  // Effective states (combining server state with optimistic state)
+  bool get _effectiveAreFriends {
+    if (_optimisticState == _OptimisticState.accepting) return true;
+    return widget.status.areFriends;
+  }
+
+  bool get _effectiveHasOutgoing {
+    if (_optimisticState == _OptimisticState.sending) return true;
+    if (_optimisticState == _OptimisticState.accepting) return false;
+    return widget.status.hasOutgoingRequest;
+  }
+
+  bool get _effectiveHasIncoming {
+    if (_optimisticState == _OptimisticState.accepting) return false;
+    return widget.status.hasIncomingRequest;
+  }
+
+  void _handleAdd() {
+    setState(() => _optimisticState = _OptimisticState.sending);
+    widget.onAdd();
+  }
+
+  void _handleAccept() {
+    setState(() => _optimisticState = _OptimisticState.accepting);
+    widget.onAccept();
+  }
+
+  Future<void> _handleMessage() async {
+    if (_isOpeningChat) return;
+    setState(() => _isOpeningChat = true);
+    try {
+      widget.onMessage();
+    } finally {
+      if (mounted) {
+        setState(() => _isOpeningChat = false);
+      }
+    }
+  }
+
+  Future<void> _handleBlock() async {
+    if (_isBlocking) return;
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Block User?'),
+        content: Text('Are you sure you want to block ${widget.friendUsername}? They will not be able to chat with you.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Block'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isBlocking = true);
+
+    try {
+      await widget.onBlock();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User blocked')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to block user: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isBlocking = false);
+      }
+    }
+  }
+
+  @override
+  void didUpdateWidget(_ProfileActionButtons oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Clear optimistic state when server state catches up
+    if (widget.status.areFriends != oldWidget.status.areFriends ||
+        widget.status.hasOutgoingRequest != oldWidget.status.hasOutgoingRequest ||
+        widget.status.hasIncomingRequest != oldWidget.status.hasIncomingRequest) {
+      _optimisticState = _OptimisticState.none;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Action buttons row
+          if (_effectiveAreFriends) ...[
+            // Already friends - show Friends badge and Message button side by side
+            Row(
+              children: [
+                // Friends status chip
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.check_circle,
+                          size: 20,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Friends',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (widget.canMessage) ...[
+                  const SizedBox(width: 12),
+                  // Message button
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _isOpeningChat ? null : _handleMessage,
+                      icon: _isOpeningChat
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.chat_bubble_outline, size: 20),
+                      label: const Text('Message'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Block button
+            OutlinedButton.icon(
+              onPressed: _isBlocking ? null : _handleBlock,
+              icon: _isBlocking
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.block, size: 18),
+              label: const Text('Block user'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: theme.colorScheme.error,
+                side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.5)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ] else if (_effectiveHasIncoming) ...[
+            // Incoming request - show Accept and Message buttons side by side
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _handleAccept,
+                    icon: const Icon(Icons.person_add_alt_1, size: 20),
+                    label: const Text('Accept'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                if (widget.canMessage) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.tonalIcon(
+                      onPressed: _isOpeningChat ? null : _handleMessage,
+                      icon: _isOpeningChat
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: theme.colorScheme.primary,
+                              ),
+                            )
+                          : const Icon(Icons.chat_bubble_outline, size: 20),
+                      label: const Text('Message'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: widget.onDecline,
+              icon: const Icon(Icons.close, size: 18),
+              label: const Text('Decline request'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ] else if (_effectiveHasOutgoing) ...[
+            // Outgoing request - show Request Sent and Message buttons side by side
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.hourglass_top,
+                          size: 18,
+                          color: theme.colorScheme.onSecondaryContainer,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Request Sent',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: theme.colorScheme.onSecondaryContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (widget.canMessage) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.tonalIcon(
+                      onPressed: _isOpeningChat ? null : _handleMessage,
+                      icon: _isOpeningChat
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: theme.colorScheme.primary,
+                              ),
+                            )
+                          : const Icon(Icons.chat_bubble_outline, size: 20),
+                      label: const Text('Message'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: widget.onCancel,
+              icon: const Icon(Icons.undo, size: 18),
+              label: const Text('Cancel request'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ] else ...[
+            // Not friends - show Add Friend and Message buttons side by side
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _handleAdd,
+                    icon: const Icon(Icons.person_add, size: 20),
+                    label: const Text('Add Friend'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                if (widget.canMessage) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.tonalIcon(
+                      onPressed: _isOpeningChat ? null : _handleMessage,
+                      icon: _isOpeningChat
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: theme.colorScheme.primary,
+                              ),
+                            )
+                          : const Icon(Icons.chat_bubble_outline, size: 20),
+                      label: const Text('Message'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Card shown when the current user has blocked the profile user.
+/// Provides option to unblock.
+class _BlockedUserCard extends StatefulWidget {
+  const _BlockedUserCard({
+    required this.friendUsername,
+    required this.onUnblock,
+  });
+
+  final String friendUsername;
+  final Future<void> Function() onUnblock;
+
+  @override
+  State<_BlockedUserCard> createState() => _BlockedUserCardState();
+}
+
+class _BlockedUserCardState extends State<_BlockedUserCard> {
+  bool _isUnblocking = false;
+
+  Future<void> _handleUnblock() async {
+    if (_isUnblocking) return;
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Unblock User?'),
+        content: Text('Are you sure you want to unblock ${widget.friendUsername}? They will be able to send you friend requests and messages again.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Unblock'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isUnblocking = true);
+
+    try {
+      await widget.onUnblock();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User unblocked')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to unblock user: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUnblocking = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -819,43 +1503,37 @@ class _ActionCard extends StatelessWidget {
           children: [
             Text('Connection', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: 12),
-            if (status.areFriends) ...[
-              FilledButton.tonalIcon(
-                onPressed: null,
-                icon: const Icon(Icons.check),
-                label: const Text('Friends'),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.red.shade200),
               ),
-            ] else if (status.hasIncomingRequest) ...[
-              FilledButton.icon(
-                onPressed: onAccept,
-                icon: const Icon(Icons.person_add_alt_1),
-                label: const Text('Accept request'),
+              child: Row(
+                children: [
+                  Icon(Icons.block, color: Colors.red.shade700, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'You have blocked this user',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: Colors.red.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: onDecline,
-                icon: const Icon(Icons.close),
-                label: const Text('Decline'),
-              ),
-            ] else if (status.hasOutgoingRequest) ...[
-              FilledButton.tonalIcon(
-                onPressed: null,
-                icon: const Icon(Icons.hourglass_top),
-                label: const Text('Requested'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: onCancel,
-                icon: const Icon(Icons.undo),
-                label: const Text('Cancel request'),
-              ),
-            ] else ...[
-              FilledButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.person_add),
-                label: const Text('Add friend'),
-              ),
-            ],
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _isUnblocking ? null : _handleUnblock,
+              icon: _isUnblocking
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.lock_open),
+              label: const Text('Unblock'),
+            ),
           ],
         ),
       ),

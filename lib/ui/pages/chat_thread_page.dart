@@ -425,7 +425,16 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                     builder: (context, snap) {
                       final messages = snap.data;
                       if (messages == null) {
-                        return const Center(child: CircularProgressIndicator());
+                        // Skeleton loading for chat messages
+                        return ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          reverse: true,
+                          itemCount: 8,
+                          itemBuilder: (context, index) {
+                            final isMe = index % 3 != 0;
+                            return _ChatBubbleSkeletonInline(isMe: isMe);
+                          },
+                        );
                       }
 
                       // Filter out messages deleted "for me" (but keep "deleted for everyone" to show placeholder)
@@ -440,6 +449,7 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                       return ListView.builder(
                         padding: const EdgeInsets.all(16),
                         reverse: true,
+                        cacheExtent: 500, // Cache more items for smoother scrolling
                         itemCount: visibleMessages.length,
                         itemBuilder: (context, index) {
                           final m = visibleMessages[visibleMessages.length - 1 - index];
@@ -1731,6 +1741,65 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline skeleton for chat bubbles - optimized for performance
+class _ChatBubbleSkeletonInline extends StatelessWidget {
+  const _ChatBubbleSkeletonInline({this.isMe = false});
+
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final width = isMe ? 180.0 : 220.0;
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: EdgeInsets.only(
+          left: isMe ? 60 : 0,
+          right: isMe ? 0 : 60,
+          bottom: 8,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isDark
+              ? (isMe ? const Color(0xFF2A2A2A) : const Color(0xFF1E1E1E))
+              : (isMe ? const Color(0xFFE3E3E3) : const Color(0xFFF0F0F0)),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(isMe ? 18 : 4),
+            bottomRight: Radius.circular(isMe ? 4 : 18),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: width,
+              height: 12,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF3A3A3A) : const Color(0xFFD0D0D0),
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              width: width * 0.6,
+              height: 12,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF3A3A3A) : const Color(0xFFD0D0D0),
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+          ],
         ),
       ),
     );

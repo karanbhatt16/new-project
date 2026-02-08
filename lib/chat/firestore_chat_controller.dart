@@ -46,44 +46,78 @@ class FirestoreChatController extends ChangeNotifier {
     final id = _threadIdForUids(myUid, otherUid);
     final doc = _db.collection('threads').doc(id);
 
-    // Check if thread already exists
-    final existingSnap = await doc.get();
-    
-    if (existingSnap.exists) {
-      // Thread exists - just return it without updating timestamp
-      // This prevents the conversation from jumping to top when just opened
-      final data = existingSnap.data() as Map<String, dynamic>;
-      return FirestoreChatThread(
-        id: id,
-        userAUid: data['userAUid'] as String,
-        userBUid: data['userBUid'] as String,
-        userAEmail: (data['userAEmail'] as String?) ?? '',
-        userBEmail: (data['userBEmail'] as String?) ?? '',
-        lastMessageAt: (data['updatedAt'] as Timestamp?)?.toDate(),
-      );
+    // Calculate the canonical order for userA and userB
+    final userAUid = myUid.compareTo(otherUid) <= 0 ? myUid : otherUid;
+    final userBUid = myUid.compareTo(otherUid) <= 0 ? otherUid : myUid;
+    final userAEmail = myUid.compareTo(otherUid) <= 0 ? myEmail : otherEmail;
+    final userBEmail = myUid.compareTo(otherUid) <= 0 ? otherEmail : myEmail;
+
+    // Try to read existing thread - may fail with permission error if thread doesn't exist
+    // because Firestore rules can't evaluate canAccessThread on a non-existent document
+    try {
+      final existingSnap = await doc.get();
+      
+      if (existingSnap.exists) {
+        // Thread exists - just return it without updating timestamp
+        // This prevents the conversation from jumping to top when just opened
+        final data = existingSnap.data() as Map<String, dynamic>;
+        return FirestoreChatThread(
+          id: id,
+          userAUid: data['userAUid'] as String,
+          userBUid: data['userBUid'] as String,
+          userAEmail: (data['userAEmail'] as String?) ?? '',
+          userBEmail: (data['userBEmail'] as String?) ?? '',
+          lastMessageAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+        );
+      }
+    } catch (e) {
+      // Permission error or thread doesn't exist - proceed to create
+      // This is expected for new threads since rules require the document to exist
+      debugPrint('getOrCreateThread: Read failed (expected for new threads): $e');
     }
 
     // Thread doesn't exist - create it with timestamp
-    await doc.set({
-      'type': 'direct',
-      'userAUid': myUid.compareTo(otherUid) <= 0 ? myUid : otherUid,
-      'userBUid': myUid.compareTo(otherUid) <= 0 ? otherUid : myUid,
-      'userAEmail': myUid.compareTo(otherUid) <= 0 ? myEmail : otherEmail,
-      'userBEmail': myUid.compareTo(otherUid) <= 0 ? otherEmail : myEmail,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      await doc.set({
+        'type': 'direct',
+        'userAUid': userAUid,
+        'userBUid': userBUid,
+        'userAEmail': userAEmail,
+        'userBEmail': userBEmail,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('getOrCreateThread: Create failed: $e');
+      // Thread might already exist (race condition) - try reading again
+      try {
+        final snap = await doc.get();
+        if (snap.exists) {
+          final data = snap.data() as Map<String, dynamic>;
+          return FirestoreChatThread(
+            id: id,
+            userAUid: data['userAUid'] as String,
+            userBUid: data['userBUid'] as String,
+            userAEmail: (data['userAEmail'] as String?) ?? '',
+            userBEmail: (data['userBEmail'] as String?) ?? '',
+            lastMessageAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+          );
+        }
+      } catch (_) {
+        // Ignore and rethrow original error
+      }
+      rethrow;
+    }
 
-    final snap = await doc.get();
-    final data = snap.data() as Map<String, dynamic>;
-
+    // Return immediately using the data we just wrote (avoid extra read)
+    // This prevents permission issues when reading right after creation
     return FirestoreChatThread(
       id: id,
-      userAUid: data['userAUid'] as String,
-      userBUid: data['userBUid'] as String,
-      userAEmail: data['userAEmail'] as String,
-      userBEmail: data['userBEmail'] as String,
-      lastMessageAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+      userAUid: userAUid,
+      userBUid: userBUid,
+      userAEmail: userAEmail,
+      userBEmail: userBEmail,
+      lastMessageAt: DateTime.now(), // Use local time as approximation
     );
   }
 
@@ -544,10 +578,13 @@ class FirestoreChatController extends ChangeNotifier {
     return deletedCount;
   }
 
-  /// Sends a call message to record a voice call in the chat.
+  /// 📞 Sends a call message to record a voice call in the chat.
   /// 
   /// This is called when a voice call ends to show the call history in chat
   /// like WhatsApp does.
+  /// 
+  /// ✅ Call messages are marked as 'read' immediately since they are informational
+  /// records and should not trigger unread message counts.
   Future<String> sendCallMessage({
     required String threadId,
     required String fromUid,
@@ -566,6 +603,8 @@ class FirestoreChatController extends ChangeNotifier {
       'callDurationSeconds': durationSeconds,
       'sentAt': FieldValue.serverTimestamp(),
       'sentAtLocal': Timestamp.fromDate(now),
+      'read': true, // ✅ Call messages are always marked as read (informational only)
+      'status': 'read', // 🔕 Prevent unread badge for call history
     });
 
     await _db.collection('threads').doc(threadId).set({
@@ -660,9 +699,10 @@ class FirestoreChatController extends ChangeNotifier {
     });
   }
 
-  /// Stream of unread message count for a specific thread.
+  /// 📬 Stream of unread message count for a specific thread.
   /// 
   /// Counts messages sent TO the current user that haven't been read.
+  /// 📞 Excludes call and voice messages since they are informational only.
   /// Uses includeMetadataChanges to show cached data immediately when offline.
   Stream<int> unreadCountStream({required String threadId, required String myUid}) {
     // Query messages sent to me that are not yet read
@@ -673,11 +713,21 @@ class FirestoreChatController extends ChangeNotifier {
         .collection('messages')
         .where('toUid', isEqualTo: myUid)
         .snapshots(includeMetadataChanges: true)
-        .map((snap) => snap.docs.where((doc) {
-          final data = doc.data();
-          // Message is unread if 'read' field doesn't exist or is false
-          return data['read'] != true;
-        }).length);
+        .map((snap) {
+          final unreadDocs = snap.docs.where((doc) {
+            final data = doc.data();
+            // 📞 Skip call messages - they don't count as unread
+            final messageType = data['messageType'] as String?;
+            if (messageType == 'call') return false;
+            // 🎤 Skip voice messages from unread count too (optional - remove if you want voice to count)
+            // if (messageType == 'voice') return false;
+            // Message is unread if 'read' field doesn't exist or is false
+            // Also check 'status' field for newer messages
+            final isRead = data['read'] == true || data['status'] == 'read';
+            return !isRead;
+          });
+          return unreadDocs.length;
+        });
   }
 
   /// Marks all messages in a thread as read for the current user.
@@ -758,6 +808,34 @@ class FirestoreChatController extends ChangeNotifier {
           'read': true,
           'status': 'read',
         });
+  }
+
+  /// 🧹 Marks all call messages in a thread as read.
+  /// 
+  /// Call this to fix old call messages that were saved without read:true.
+  /// This is a one-time cleanup for existing data.
+  Future<void> markCallMessagesAsRead({required String threadId}) async {
+    final messages = await _db
+        .collection('threads')
+        .doc(threadId)
+        .collection('messages')
+        .where('messageType', isEqualTo: 'call')
+        .get();
+
+    if (messages.docs.isEmpty) return;
+
+    final batch = _db.batch();
+    for (final doc in messages.docs) {
+      final data = doc.data();
+      final isRead = data['read'] as bool? ?? false;
+      if (!isRead) {
+        batch.update(doc.reference, {
+          'read': true,
+          'status': 'read',
+        });
+      }
+    }
+    await batch.commit();
   }
 
   /// Get a thread by ID, preferring cache for instant loading.

@@ -3,6 +3,9 @@ const admin = require('firebase-admin');
 
 admin.initializeApp();
 
+// Games: Two Truths & One Lie
+exports.gamesTwoTruths = require('./games_two_truths');
+
 // ===========================
 // Voice Call Push Notification
 // ===========================

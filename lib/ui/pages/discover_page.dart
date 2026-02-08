@@ -959,30 +959,33 @@ class _SwipeDiscoverState extends State<_SwipeDiscover> {
                   setState(() => _swipedUids.add(u.uid));
                 }
 
-                // For friend/match, run the network write first.
-                // If anything fails, throw so SwipeDeck can rollback the card.
+                // Fire and forget - don't block the swipe animation for network calls.
+                // The card is already gone, so we just queue the request.
                 if (action == SwipeAction.friend) {
-                  await widget.social.sendRequest(fromUid: widget.signedInUid, toUid: u.uid);
+                  widget.social.sendRequest(fromUid: widget.signedInUid, toUid: u.uid).catchError((e) {
+                    debugPrint('Failed to send friend request: $e');
+                  });
                 } else if (action == SwipeAction.match) {
-                  await widget.social.sendMatchRequest(fromUid: widget.signedInUid, toUid: u.uid);
+                  widget.social.sendMatchRequest(fromUid: widget.signedInUid, toUid: u.uid).catchError((e) {
+                    debugPrint('Failed to send match request: $e');
+                  });
                 }
 
                 // Persist locally (reliable) + best-effort Firestore write.
                 await _localSwipes.addExcluded(widget.signedInUid, u.uid);
 
-                try {
-                  await widget.social.recordSwipe(
-                    uid: widget.signedInUid,
-                    otherUid: u.uid,
-                    decision: switch (action) {
-                      SwipeAction.match => SwipeDecision.match,
-                      SwipeAction.friend => SwipeDecision.friend,
-                      SwipeAction.skip => SwipeDecision.skip,
-                    },
-                  );
-                } catch (_) {
+                // Fire and forget for swipe recording too
+                widget.social.recordSwipe(
+                  uid: widget.signedInUid,
+                  otherUid: u.uid,
+                  decision: switch (action) {
+                    SwipeAction.match => SwipeDecision.match,
+                    SwipeAction.friend => SwipeDecision.friend,
+                    SwipeAction.skip => SwipeDecision.skip,
+                  },
+                ).catchError((_) {
                   // Ignore: local store already ensures it won't reappear.
-                }
+                });
                     },
                   ),
                   ),

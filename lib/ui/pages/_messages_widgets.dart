@@ -1,8 +1,7 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 
 import '../../auth/app_user.dart';
+import '../widgets/cached_avatar.dart';
 
 class UserAvatar extends StatelessWidget {
   const UserAvatar({super.key, required this.user, this.radius = 20});
@@ -12,11 +11,9 @@ class UserAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CircleAvatar(
+    return CachedAvatar(
+      imageBytes: user.profileImageBytes,
       radius: radius,
-      backgroundImage:
-          user.profileImageBytes == null ? null : MemoryImage(Uint8List.fromList(user.profileImageBytes!)),
-      child: user.profileImageBytes == null ? const Icon(Icons.person) : null,
     );
   }
 }
