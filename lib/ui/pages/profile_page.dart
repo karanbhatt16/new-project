@@ -531,6 +531,12 @@ class ProfilePage extends StatelessWidget {
                                 builder: (_) => _MyPostsPage(
                                   posts: posts,
                                   signedInUid: signedInUid,
+                                  auth: auth,
+                                  social: social,
+                                  chat: chat,
+                                  e2eeChat: e2eeChat,
+                                  notifications: notifications,
+                                  callController: callController,
                                 ),
                               ),
                             );
@@ -771,10 +777,22 @@ class _MyPostsPage extends StatelessWidget {
   const _MyPostsPage({
     required this.posts,
     required this.signedInUid,
+    this.auth,
+    this.social,
+    this.chat,
+    this.e2eeChat,
+    this.notifications,
+    this.callController,
   });
 
   final FirestorePostsController posts;
   final String signedInUid;
+  final FirebaseAuthController? auth;
+  final FirestoreSocialGraphController? social;
+  final FirestoreChatController? chat;
+  final E2eeChatController? e2eeChat;
+  final FirestoreNotificationsController? notifications;
+  final VoiceCallController? callController;
 
   @override
   Widget build(BuildContext context) {
@@ -853,6 +871,12 @@ class _MyPostsPage extends StatelessWidget {
                   post: items[index],
                   currentUid: signedInUid,
                   posts: posts,
+                  auth: auth,
+                  social: social,
+                  chat: chat,
+                  e2eeChat: e2eeChat,
+                  notifications: notifications,
+                  callController: callController,
                 ),
               );
             },

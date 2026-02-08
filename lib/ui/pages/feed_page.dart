@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../auth/firebase_auth_controller.dart';
+import '../../call/voice_call_controller.dart';
+import '../../chat/e2ee_chat_controller.dart';
+import '../../chat/firestore_chat_controller.dart';
+import '../../notifications/firestore_notifications_controller.dart';
 import '../../posts/firestore_posts_controller.dart';
 import '../../social/firestore_social_graph_controller.dart';
 import '../widgets/async_error_view.dart';
@@ -14,12 +18,20 @@ class FeedPage extends StatefulWidget {
     required this.posts,
     this.auth,
     this.social,
+    this.chat,
+    this.e2eeChat,
+    this.notifications,
+    this.callController,
   });
 
   final String currentUid;
   final FirestorePostsController posts;
   final FirebaseAuthController? auth;
   final FirestoreSocialGraphController? social;
+  final FirestoreChatController? chat;
+  final E2eeChatController? e2eeChat;
+  final FirestoreNotificationsController? notifications;
+  final VoiceCallController? callController;
 
   @override
   State<FeedPage> createState() => FeedPageState();
@@ -163,6 +175,10 @@ class FeedPageState extends State<FeedPage> {
                     posts: widget.posts,
                     auth: widget.auth,
                     social: widget.social,
+                    chat: widget.chat,
+                    e2eeChat: widget.e2eeChat,
+                    notifications: widget.notifications,
+                    callController: widget.callController,
                   ),
                 );
               },

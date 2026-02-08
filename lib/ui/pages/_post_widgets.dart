@@ -4,8 +4,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
 
-import '../../auth/app_user.dart';
 import '../../auth/firebase_auth_controller.dart';
+import '../../call/voice_call_controller.dart';
+import '../../chat/e2ee_chat_controller.dart';
+import '../../chat/firestore_chat_controller.dart';
+import '../../notifications/firestore_notifications_controller.dart';
 import '../../posts/firestore_posts_controller.dart';
 import '../../posts/post_models.dart';
 import '../../social/firestore_social_graph_controller.dart';
@@ -26,6 +29,10 @@ class PostCard extends StatefulWidget {
     required this.posts,
     this.auth,
     this.social,
+    this.chat,
+    this.e2eeChat,
+    this.notifications,
+    this.callController,
   });
 
   final Post post;
@@ -33,6 +40,10 @@ class PostCard extends StatefulWidget {
   final FirestorePostsController posts;
   final FirebaseAuthController? auth;
   final FirestoreSocialGraphController? social;
+  final FirestoreChatController? chat;
+  final E2eeChatController? e2eeChat;
+  final FirestoreNotificationsController? notifications;
+  final VoiceCallController? callController;
 
   @override
   State<PostCard> createState() => _PostCardState();
@@ -68,6 +79,10 @@ class _PostCardState extends State<PostCard> {
           user: user,
           social: widget.social!,
           auth: widget.auth,
+          chat: widget.chat,
+          e2eeChat: widget.e2eeChat,
+          notifications: widget.notifications,
+          callController: widget.callController,
         ),
       ),
     );
@@ -260,6 +275,10 @@ class _PostCardState extends State<PostCard> {
         posts: widget.posts,
         auth: widget.auth,
         social: widget.social,
+        chat: widget.chat,
+        e2eeChat: widget.e2eeChat,
+        notifications: widget.notifications,
+        callController: widget.callController,
       ),
     );
   }
@@ -362,6 +381,10 @@ class _CommentsSheet extends StatefulWidget {
     required this.posts,
     this.auth,
     this.social,
+    this.chat,
+    this.e2eeChat,
+    this.notifications,
+    this.callController,
   });
 
   final Post post;
@@ -369,6 +392,10 @@ class _CommentsSheet extends StatefulWidget {
   final FirestorePostsController posts;
   final FirebaseAuthController? auth;
   final FirestoreSocialGraphController? social;
+  final FirestoreChatController? chat;
+  final E2eeChatController? e2eeChat;
+  final FirestoreNotificationsController? notifications;
+  final VoiceCallController? callController;
 
   @override
   State<_CommentsSheet> createState() => _CommentsSheetState();
@@ -569,6 +596,10 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                       timeAgo: _timeAgo(comment.createdAt),
                       auth: widget.auth,
                       social: widget.social,
+                      chat: widget.chat,
+                      e2eeChat: widget.e2eeChat,
+                      notifications: widget.notifications,
+                      callController: widget.callController,
                     );
                   },
                 );
@@ -709,6 +740,10 @@ class _CommentTile extends StatelessWidget {
     required this.timeAgo,
     this.auth,
     this.social,
+    this.chat,
+    this.e2eeChat,
+    this.notifications,
+    this.callController,
   });
 
   final Comment comment;
@@ -717,6 +752,10 @@ class _CommentTile extends StatelessWidget {
   final String timeAgo;
   final FirebaseAuthController? auth;
   final FirestoreSocialGraphController? social;
+  final FirestoreChatController? chat;
+  final E2eeChatController? e2eeChat;
+  final FirestoreNotificationsController? notifications;
+  final VoiceCallController? callController;
 
   Future<void> _openUserProfile(BuildContext context, String uid) async {
     if (auth == null || social == null) return;
@@ -732,6 +771,10 @@ class _CommentTile extends StatelessWidget {
           user: user,
           social: social!,
           auth: auth,
+          chat: chat,
+          e2eeChat: e2eeChat,
+          notifications: notifications,
+          callController: callController,
         ),
       ),
     );

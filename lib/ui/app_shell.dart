@@ -590,6 +590,10 @@ class _AppShellState extends State<AppShell> {
           posts: widget.posts,
           auth: widget.auth,
           social: widget.social,
+          chat: widget.chat,
+          e2eeChat: widget.e2eeChat,
+          notifications: widget.notifications,
+          callController: _callController,
         );
       case 3:
         return MessagesPage(
