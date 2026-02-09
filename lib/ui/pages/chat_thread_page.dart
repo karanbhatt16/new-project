@@ -160,12 +160,13 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
   bool _showingFullEmojiPicker = false;
 
   // Voice recording state
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  AudioRecorder? _audioRecorder;
   bool _isRecording = false;
   DateTime? _recordingStartTime;
   Timer? _recordingTimer;
   int _recordingDurationSeconds = 0;
   String? _recordingPath;
+  bool _isVoiceRecordingSupported = true;
 
   // Voice message playback
   final Map<String, AudioPlayer> _audioPlayers = {};
@@ -182,26 +183,64 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
   @override
   void initState() {
     super.initState();
+    _initializeAudioRecorder();
     // Mark messages and notifications as read when chat is opened
     _markMessagesAsRead();
   }
 
+  /// Initialize audio recorder with platform detection
+  Future<void> _initializeAudioRecorder() async {
+    try {
+      // Check if we're on web or unsupported platform
+      if (foundation.kIsWeb) {
+        // Web platform - record package has limited support
+        setState(() => _isVoiceRecordingSupported = false);
+        return;
+      }
+      
+      // Try to initialize the audio recorder
+      _audioRecorder = AudioRecorder();
+      
+      // Test if the recorder is actually supported
+      final hasPermission = await _audioRecorder!.hasPermission();
+      if (!hasPermission) {
+        // If permission check fails, recording might not be supported
+        setState(() => _isVoiceRecordingSupported = false);
+      }
+    } catch (e) {
+      // If initialization fails, disable voice recording
+      print('Voice recording not supported on this platform: $e');
+      setState(() => _isVoiceRecordingSupported = false);
+      _audioRecorder = null;
+    }
+  }
+
   Future<void> _markMessagesAsRead() async {
-    // First mark messages as delivered (grey double tick)
-    await widget.chat.markMessagesAsDelivered(
-      threadId: widget.thread.id,
-      myUid: widget.currentUser.uid,
-    );
-    // Then mark as read (blue double tick)
-    await widget.chat.markThreadAsRead(
-      threadId: widget.thread.id,
-      myUid: widget.currentUser.uid,
-    );
-    // Also mark notifications as read
-    await widget.notifications.markMessageNotificationsRead(
-      uid: widget.currentUser.uid,
-      threadId: widget.thread.id,
-    );
+    try {
+      debugPrint('🔵 ChatThreadPage: Marking messages as read for thread ${widget.thread.id}');
+      
+      // First mark messages as delivered (grey double tick)
+      await widget.chat.markMessagesAsDelivered(
+        threadId: widget.thread.id,
+        myUid: widget.currentUser.uid,
+      );
+      
+      // Then mark as read (blue double tick)
+      await widget.chat.markThreadAsRead(
+        threadId: widget.thread.id,
+        myUid: widget.currentUser.uid,
+      );
+      
+      // Also mark notifications as read
+      await widget.notifications.markMessageNotificationsRead(
+        uid: widget.currentUser.uid,
+        threadId: widget.thread.id,
+      );
+      
+      debugPrint('✅ ChatThreadPage: Messages marked as read successfully');
+    } catch (e) {
+      debugPrint('❌ ChatThreadPage: Error marking messages as read: $e');
+    }
   }
 
   @override
@@ -210,7 +249,7 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
     _controller.dispose();
     _focusNode.dispose();
     _recordingTimer?.cancel();
-    _audioRecorder.dispose();
+    _audioRecorder?.dispose();
     for (final player in _audioPlayers.values) {
       player.dispose();
     }
@@ -952,12 +991,25 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
 
   // Voice recording methods
   Future<void> _startRecording() async {
+    // Check if voice recording is supported
+    if (!_isVoiceRecordingSupported || _audioRecorder == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Voice messages are not supported on this platform. Please use the mobile app.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
     try {
-      if (await _audioRecorder.hasPermission()) {
+      if (await _audioRecorder!.hasPermission()) {
         final dir = await getTemporaryDirectory();
         final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
         
-        await _audioRecorder.start(
+        await _audioRecorder!.start(
           const RecordConfig(
             encoder: AudioEncoder.aacLc,
             bitRate: 128000,
@@ -997,7 +1049,7 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
 
   Future<void> _cancelRecording() async {
     _recordingTimer?.cancel();
-    await _audioRecorder.stop();
+    await _audioRecorder?.stop();
     
     // Delete the recorded file
     if (_recordingPath != null) {
@@ -1019,7 +1071,7 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
 
   Future<void> _stopAndSendRecording() async {
     _recordingTimer?.cancel();
-    final path = await _audioRecorder.stop();
+    final path = await _audioRecorder?.stop();
     
     if (path == null || _recordingDurationSeconds < 1) {
       // Too short, cancel
@@ -1081,44 +1133,80 @@ class _ChatThreadPageState extends State<ChatThreadPage> {
   AudioPlayer _getPlayer(String messageId) {
     return _audioPlayers.putIfAbsent(messageId, () {
       final player = AudioPlayer();
+      
+      // Web-specific: Set release mode to keep the player ready
+      if (foundation.kIsWeb) {
+        player.setReleaseMode(ReleaseMode.stop);
+      }
+      
       player.onPlayerComplete.listen((_) {
-        setState(() {
-          _isPlaying[messageId] = false;
-          _playerPositions[messageId] = Duration.zero;
-        });
+        if (mounted) {
+          setState(() {
+            _isPlaying[messageId] = false;
+            _playerPositions[messageId] = Duration.zero;
+          });
+        }
       });
       player.onPositionChanged.listen((pos) {
-        setState(() {
-          _playerPositions[messageId] = pos;
-        });
+        if (mounted) {
+          setState(() {
+            _playerPositions[messageId] = pos;
+          });
+        }
       });
       player.onDurationChanged.listen((dur) {
-        setState(() {
-          _playerDurations[messageId] = dur;
-        });
+        if (mounted) {
+          setState(() {
+            _playerDurations[messageId] = dur;
+          });
+        }
       });
       return player;
     });
   }
 
   Future<void> _togglePlayback(String messageId, String url) async {
-    final player = _getPlayer(messageId);
-    final playing = _isPlaying[messageId] ?? false;
-    
-    if (playing) {
-      await player.pause();
-      setState(() => _isPlaying[messageId] = false);
-    } else {
-      // Stop other players
-      for (final entry in _audioPlayers.entries) {
-        if (entry.key != messageId && (_isPlaying[entry.key] ?? false)) {
-          await entry.value.pause();
-          _isPlaying[entry.key] = false;
+    try {
+      final player = _getPlayer(messageId);
+      final playing = _isPlaying[messageId] ?? false;
+      
+      if (playing) {
+        await player.pause();
+        if (mounted) {
+          setState(() => _isPlaying[messageId] = false);
+        }
+      } else {
+        // Stop other players
+        for (final entry in _audioPlayers.entries) {
+          if (entry.key != messageId && (_isPlaying[entry.key] ?? false)) {
+            await entry.value.pause();
+            _isPlaying[entry.key] = false;
+          }
+        }
+        
+        // Web-specific: Set audio context and use proper source
+        if (foundation.kIsWeb) {
+          // For web, we need to ensure the URL is properly loaded
+          await player.setSourceUrl(url);
+          await player.resume();
+        } else {
+          await player.play(UrlSource(url));
+        }
+        
+        if (mounted) {
+          setState(() => _isPlaying[messageId] = true);
         }
       }
-      
-      await player.play(UrlSource(url));
-      setState(() => _isPlaying[messageId] = true);
+    } catch (e) {
+      print('Error playing audio: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to play voice message: ${e.toString()}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 

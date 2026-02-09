@@ -168,6 +168,35 @@ class FirestorePostsController {
     });
   }
 
+  /// Check if a user has already reported a post
+  Future<bool> hasUserReported({
+    required String postId,
+    required String uid,
+  }) async {
+    final postRef = _db.collection('posts').doc(postId);
+    final existingReport = await postRef
+        .collection('reports')
+        .where('reportedByUid', isEqualTo: uid)
+        .limit(1)
+        .get();
+    
+    return existingReport.docs.isNotEmpty;
+  }
+
+  /// Stream to check if user has reported a post
+  Stream<bool> hasUserReportedStream({
+    required String postId,
+    required String uid,
+  }) {
+    final postRef = _db.collection('posts').doc(postId);
+    return postRef
+        .collection('reports')
+        .where('reportedByUid', isEqualTo: uid)
+        .limit(1)
+        .snapshots()
+        .map((snap) => snap.docs.isNotEmpty);
+  }
+
   Future<void> reportPost({
     required String postId,
     required String reportedByUid,
@@ -175,7 +204,15 @@ class FirestorePostsController {
     String? details,
   }) async {
     final postRef = _db.collection('posts').doc(postId);
-    final reportRef = postRef.collection('reports').doc();
+    
+    // Check if user has already reported this post
+    final alreadyReported = await hasUserReported(postId: postId, uid: reportedByUid);
+    if (alreadyReported) {
+      throw StateError('You have already reported this post');
+    }
+    
+    // Use the user's UID as the report document ID to prevent duplicates
+    final reportRef = postRef.collection('reports').doc(reportedByUid);
 
     await _db.runTransaction((tx) async {
       tx.set(reportRef, {

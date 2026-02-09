@@ -202,6 +202,9 @@ class E2eeChatController extends ChangeNotifier {
   /// Cache for already-decrypted message texts: messageId -> decrypted text
   final Map<String, String> _decryptedMessageCache = {};
 
+  /// Cache for decrypted voice URLs: messageId -> decrypted URL
+  final Map<String, String> _decryptedVoiceUrlCache = {};
+
   /// Stream of messages with decrypted text populated.
   /// 
   /// This decrypts messages as they arrive from Firestore and caches the result.
@@ -213,25 +216,42 @@ class E2eeChatController extends ChangeNotifier {
       final result = <FirestoreMessage>[];
       
       for (final m in messages) {
-        // If already has plaintext or is not encrypted, keep as-is
-        if (m.text != null || m.ciphertextB64 == null) {
-          result.add(m);
-          continue;
+        String? decryptedText;
+        String? decryptedVoiceUrl;
+        
+        // Decrypt text if encrypted
+        if (m.text == null && m.ciphertextB64 != null) {
+          // Check cache first
+          if (_decryptedMessageCache.containsKey(m.id)) {
+            decryptedText = _decryptedMessageCache[m.id]!;
+          } else {
+            // Decrypt the message using the simple app-wide key
+            decryptedText = await decryptMessage(m);
+            if (decryptedText != null) {
+              _decryptedMessageCache[m.id] = decryptedText;
+            }
+          }
         }
         
-        // Check cache first
-        if (_decryptedMessageCache.containsKey(m.id)) {
-          result.add(_withDecryptedText(m, _decryptedMessageCache[m.id]!));
-          continue;
+        // Decrypt voice URL if encrypted
+        if (m.isVoiceMessage && m.voiceUrl == null && m.voiceUrlCiphertextB64 != null) {
+          // Check cache first
+          if (_decryptedVoiceUrlCache.containsKey(m.id)) {
+            decryptedVoiceUrl = _decryptedVoiceUrlCache[m.id]!;
+          } else {
+            // Decrypt the voice URL
+            decryptedVoiceUrl = await decryptVoiceUrl(m);
+            if (decryptedVoiceUrl != null) {
+              _decryptedVoiceUrlCache[m.id] = decryptedVoiceUrl;
+            }
+          }
         }
         
-        // Decrypt the message using the simple app-wide key
-        final decrypted = await decryptMessage(m);
-        if (decrypted != null) {
-          _decryptedMessageCache[m.id] = decrypted;
-          result.add(_withDecryptedText(m, decrypted));
+        // Add message with decrypted content
+        if (decryptedText != null || decryptedVoiceUrl != null) {
+          result.add(_withDecryptedContent(m, decryptedText, decryptedVoiceUrl));
         } else {
-          result.add(m); // Keep encrypted message as-is if decryption fails
+          result.add(m); // Keep as-is if no decryption needed or decryption failed
         }
       }
       
@@ -239,18 +259,18 @@ class E2eeChatController extends ChangeNotifier {
     });
   }
 
-  /// Create a copy of the message with decrypted text set.
-  FirestoreMessage _withDecryptedText(FirestoreMessage m, String text) {
+  /// Create a copy of the message with decrypted content set.
+  FirestoreMessage _withDecryptedContent(FirestoreMessage m, String? decryptedText, String? decryptedVoiceUrl) {
     return FirestoreMessage(
       id: m.id,
       threadId: m.threadId,
       fromUid: m.fromUid,
       toUid: m.toUid,
       sentAt: m.sentAt,
-      text: text, // Set decrypted text here
-      ciphertextB64: null, // Clear encrypted fields since we have plaintext now
-      nonceB64: null,
-      macB64: null,
+      text: decryptedText ?? m.text, // Set decrypted text if available
+      ciphertextB64: decryptedText != null ? null : m.ciphertextB64, // Clear encrypted fields if we have plaintext
+      nonceB64: decryptedText != null ? null : m.nonceB64,
+      macB64: decryptedText != null ? null : m.macB64,
       replyToMessageId: m.replyToMessageId,
       replyToFromUid: m.replyToFromUid,
       replyToText: m.replyToText,
@@ -261,17 +281,19 @@ class E2eeChatController extends ChangeNotifier {
       callStatus: m.callStatus,
       deletedForEveryone: m.deletedForEveryone,
       deletedForUsers: m.deletedForUsers,
-      voiceUrl: m.voiceUrl,
+      voiceUrl: decryptedVoiceUrl ?? m.voiceUrl, // Set decrypted voice URL if available
       voiceDurationSeconds: m.voiceDurationSeconds,
-      voiceUrlCiphertextB64: m.voiceUrlCiphertextB64,
-      voiceUrlNonceB64: m.voiceUrlNonceB64,
-      voiceUrlMacB64: m.voiceUrlMacB64,
+      voiceUrlCiphertextB64: decryptedVoiceUrl != null ? null : m.voiceUrlCiphertextB64, // Clear encrypted fields if we have plaintext URL
+      voiceUrlNonceB64: decryptedVoiceUrl != null ? null : m.voiceUrlNonceB64,
+      voiceUrlMacB64: decryptedVoiceUrl != null ? null : m.voiceUrlMacB64,
+      status: m.status,
     );
   }
 
   /// Clear cached messages (call on sign out)
   void clearCache() {
     _decryptedMessageCache.clear();
+    _decryptedVoiceUrlCache.clear();
   }
 
   @override

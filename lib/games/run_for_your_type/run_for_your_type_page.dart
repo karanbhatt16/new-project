@@ -142,7 +142,12 @@ class _RunForYourTypePageState extends State<RunForYourTypePage>
           _phase = _GamePhase.preferredMatch;
           _currentQuestionIndex = 0;
         });
-        _animateToNext();
+        // Use addPostFrameCallback to ensure setState completes before animating
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _animateToNext();
+          }
+        });
       } else {
         // Submit answers
         _submitAnswers();

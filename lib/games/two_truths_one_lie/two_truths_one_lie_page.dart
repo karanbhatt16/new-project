@@ -55,13 +55,29 @@ class _TwoTruthsOneLiePageState extends State<TwoTruthsOneLiePage> with SingleTi
   }
 
   Future<void> _load() async {
+    debugPrint('📱 ========== STARTING LOAD ==========');
+    debugPrint('📱 Current user UID: ${widget.uid}');
+    
     try {
+      debugPrint('📱 Step 1: Getting user submission...');
       final sub = await _controller.getSubmission(widget.uid);
+      debugPrint('📱 Step 1 complete. Has submission: ${sub != null}');
+      
+      debugPrint('📱 Step 2: Getting lie index...');
       final myLieIndex = await _controller.getMyLieIndex(widget.uid);
+      debugPrint('📱 Step 2 complete. Lie index: $myLieIndex');
+      
+      debugPrint('📱 Step 3: Getting submissions to guess...');
       final toGuess = await _controller.getSubmissionsToGuess(currentUid: widget.uid, limit: 10);
+      debugPrint('📱 Step 3 complete. Found ${toGuess.length} submissions');
+      debugPrint('📱 Queue contents: ${toGuess.map((s) => 'uid:${s.uid}, stmt1:${s.statement1.substring(0, 20)}...').toList()}');
+      
+      debugPrint('📱 Step 4: Getting stats...');
       final stats = await _controller.getMyStats(widget.uid);
+      debugPrint('📱 Step 4 complete. Stats: correct=${stats.correctGuesses}, total=${stats.totalGuesses}');
       
       if (mounted) {
+        debugPrint('📱 Step 5: Updating UI state...');
         setState(() {
           _loading = false;
           if (sub != null) {
@@ -73,9 +89,14 @@ class _TwoTruthsOneLiePageState extends State<TwoTruthsOneLiePage> with SingleTi
           _queue = toGuess;
           _stats = stats;
         });
+        debugPrint('📱 Step 5 complete. UI state: _queue.length = ${_queue.length}, _loading = $_loading');
+        debugPrint('📱 ========== LOAD COMPLETE ==========');
+      } else {
+        debugPrint('📱 WARNING: Widget not mounted, skipping state update');
       }
-    } catch (e) {
-      debugPrint('Error loading Two Truths game: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ ERROR loading Two Truths game: $e');
+      debugPrint('❌ Stack trace: $stackTrace');
       if (mounted) {
         setState(() {
           _loading = false;
@@ -85,6 +106,7 @@ class _TwoTruthsOneLiePageState extends State<TwoTruthsOneLiePage> with SingleTi
           SnackBar(
             content: Text('Error loading game data: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -108,6 +130,33 @@ class _TwoTruthsOneLiePageState extends State<TwoTruthsOneLiePage> with SingleTi
       }
     } catch (e) {
       if (mounted) setState(() => _loadingLeaderboard = false);
+    }
+  }
+
+  Future<void> _resetGuesses() async {
+    try {
+      debugPrint('🔄 Resetting all guesses for user: ${widget.uid}');
+      await _controller.resetMyGuesses(widget.uid);
+      if (!mounted) return;
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Your guesses have been reset!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      
+      // Reload the page
+      await _load();
+    } catch (e) {
+      debugPrint('❌ Error resetting guesses: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error resetting guesses: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -174,15 +223,23 @@ class _TwoTruthsOneLiePageState extends State<TwoTruthsOneLiePage> with SingleTi
     }
   }
 
-  Future<void> _guess(TwoTruthsSubmission sub, int index) async {
+  Future<void> _guess(TwoTruthsSubmission sub, int shuffledIndex) async {
+    debugPrint('🎯 Guess tapped! Shuffled Index: $shuffledIndex, Target: ${sub.uid}');
     HapticFeedback.mediumImpact();
     
     try {
+      // Convert shuffled index back to original index
+      final originalIndex = sub.getOriginalIndex(shuffledIndex);
+      debugPrint('🎯 Shuffled index $shuffledIndex maps to original index $originalIndex');
+      
+      debugPrint('🎯 Submitting guess...');
       final result = await _controller.submitGuessAndGetResult(
         guesserUid: widget.uid,
         targetUid: sub.uid,
-        guessedLieIndex: index,
+        guessedLieIndex: originalIndex,
       );
+      
+      debugPrint('🎯 Guess result: ${result.isCorrect ? "CORRECT!" : "WRONG"} (actual lie was ${result.actualLieIndex})');
       
       if (!mounted) return;
       
@@ -198,9 +255,14 @@ class _TwoTruthsOneLiePageState extends State<TwoTruthsOneLiePage> with SingleTi
       if (mounted) setState(() => _stats = stats);
       
     } catch (e) {
+      debugPrint('❌ Error submitting guess: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
       );
     }
   }
@@ -425,7 +487,9 @@ class _TwoTruthsOneLiePageState extends State<TwoTruthsOneLiePage> with SingleTi
               ),
               const SizedBox(height: 8),
               Text(
-                'No more statements to guess right now.\nCheck back later for new ones!',
+                _stats.totalGuesses > 0
+                    ? 'You\'ve guessed on all ${_stats.totalGuesses} available submissions!\nWait for more users to submit their statements.'
+                    : 'No more statements to guess right now.\nCheck back later for new ones!',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -437,6 +501,35 @@ class _TwoTruthsOneLiePageState extends State<TwoTruthsOneLiePage> with SingleTi
                 icon: const Icon(Icons.refresh),
                 label: const Text('Refresh'),
               ),
+              const SizedBox(height: 12),
+              // Debug button to reset guesses (for testing)
+              if (_stats.totalGuesses > 0)
+                TextButton.icon(
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Reset Guesses?'),
+                        content: const Text('This will delete all your previous guesses so you can guess again. This is for testing purposes only.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Reset'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true && mounted) {
+                      await _resetGuesses();
+                    }
+                  },
+                  icon: const Icon(Icons.refresh_outlined),
+                  label: const Text('Reset My Guesses (Testing)'),
+                ),
             ],
           ),
         ),
@@ -821,7 +914,9 @@ class _GuessCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final items = submission.statements.asMap().entries.toList();
+    // Use shuffled statements if available, otherwise use original order
+    final displayStatements = submission.shuffledStatements;
+    final items = displayStatements.asMap().entries.toList();
     
     return Card(
       elevation: 8,

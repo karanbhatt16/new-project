@@ -251,10 +251,42 @@ class _PostCardState extends State<PostCard> {
                 ),
                 Text('${widget.post.commentCount}'),
                 const Spacer(),
-                IconButton(
-                  tooltip: 'Report',
-                  onPressed: () => _showReportDialog(context),
-                  icon: const Icon(Icons.flag_outlined),
+                // Show flag with report count - red if reported by user or has reports
+                StreamBuilder<bool>(
+                  stream: widget.posts.hasUserReportedStream(
+                    postId: widget.post.id,
+                    uid: widget.currentUid,
+                  ),
+                  builder: (context, reportSnap) {
+                    final hasReported = reportSnap.data ?? false;
+                    final hasReports = widget.post.reportCount > 0;
+                    final isRed = hasReported || hasReports;
+                    
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (hasReports) ...[
+                          Text(
+                            '${widget.post.reportCount}',
+                            style: TextStyle(
+                              color: isRed ? Colors.red : null,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        IconButton(
+                          tooltip: hasReported ? 'Already reported' : 'Report',
+                          onPressed: hasReported ? null : () => _showReportDialog(context),
+                          icon: Icon(
+                            hasReported ? Icons.flag : Icons.flag_outlined,
+                            color: isRed ? Colors.red : null,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),

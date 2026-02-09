@@ -261,6 +261,7 @@ class FirestoreChatController extends ChangeNotifier {
       'replyToMessageId': replyToMessageId,
       'replyToFromUid': replyToFromUid,
       'replyToText': replyToText,
+      'read': false, // Unread by default - same as notifications
       'status': 'sent', // Message delivery status
     });
 
@@ -312,6 +313,7 @@ class FirestoreChatController extends ChangeNotifier {
       'replyToMessageId': replyToMessageId,
       'replyToFromUid': replyToFromUid,
       'replyToTextEncrypted': replyToTextEncrypted,
+      'read': false, // Unread by default - same as notifications
       'status': 'sent', // Message delivery status
     });
 
@@ -365,6 +367,7 @@ class FirestoreChatController extends ChangeNotifier {
       'replyToMessageId': replyToMessageId,
       'replyToFromUid': replyToFromUid,
       'replyToTextEncrypted': replyToTextEncrypted,
+      'read': false, // Unread by default - same as notifications
       'status': 'sent', // Message delivery status
     });
 
@@ -702,30 +705,34 @@ class FirestoreChatController extends ChangeNotifier {
   /// 📬 Stream of unread message count for a specific thread.
   /// 
   /// Counts messages sent TO the current user that haven't been read.
-  /// 📞 Excludes call and voice messages since they are informational only.
-  /// Uses includeMetadataChanges to show cached data immediately when offline.
+  /// 📞 Excludes call messages since they are informational only.
+  /// 
+  /// Uses the same approach as notifications: queries by 'read' field for reliability.
+  /// Also handles old messages where 'read' field might be null.
   Stream<int> unreadCountStream({required String threadId, required String myUid}) {
-    // Query messages sent to me that are not yet read
-    // Messages without 'read' field are considered unread
+    // Get ALL messages sent to me, then filter in the stream
+    // We can't use whereIn for null values, so we fetch all and filter
     return _db
         .collection('threads')
         .doc(threadId)
         .collection('messages')
         .where('toUid', isEqualTo: myUid)
-        .snapshots(includeMetadataChanges: true)
+        .snapshots()
         .map((snap) {
+          // Count messages where read is false OR null (old messages)
           final unreadDocs = snap.docs.where((doc) {
             final data = doc.data();
-            // 📞 Skip call messages - they don't count as unread
             final messageType = data['messageType'] as String?;
+            final read = data['read'] as bool?;
+            
+            // Exclude call messages (they are marked as read when created)
             if (messageType == 'call') return false;
-            // 🎤 Skip voice messages from unread count too (optional - remove if you want voice to count)
-            // if (messageType == 'voice') return false;
-            // Message is unread if 'read' field doesn't exist or is false
-            // Also check 'status' field for newer messages
-            final isRead = data['read'] == true || data['status'] == 'read';
-            return !isRead;
+            
+            // Count as unread if read is false or null (old messages)
+            return read != true;
           });
+          
+          debugPrint('📬 Unread count for thread $threadId: ${unreadDocs.length} (total fetched: ${snap.docs.length})');
           return unreadDocs.length;
         });
   }
@@ -742,27 +749,40 @@ class FirestoreChatController extends ChangeNotifier {
         .where('toUid', isEqualTo: myUid)
         .get();
 
-    if (messages.docs.isEmpty) return;
+    if (messages.docs.isEmpty) {
+      debugPrint('📬 markThreadAsRead: No messages found for thread $threadId');
+      return;
+    }
 
     final batch = _db.batch();
     int updateCount = 0;
     for (final doc in messages.docs) {
       final data = doc.data();
-      final status = data['status'] as String?;
-      final isRead = data['read'] as bool? ?? false;
+      final read = data['read'] as bool?;
+      final messageType = data['messageType'] as String?;
       
-      // Update if not already marked as read (handles old messages too)
-      if (!isRead || status != 'read') {
+      // Don't mark call messages (they're already marked as read when created)
+      if (messageType == 'call') continue;
+      
+      // Update if NOT already marked as read
+      // Check the 'read' field (not status) since that's what the query uses
+      if (read != true) {
         batch.update(doc.reference, {
           'read': true,
           'status': 'read', // Blue double tick
         });
         updateCount++;
+        debugPrint('📬 markThreadAsRead: Marking message ${doc.id.substring(0, 8)} as read (was read: $read)');
       }
     }
     
+    debugPrint('📬 markThreadAsRead: Marked $updateCount messages as read in thread $threadId (total messages: ${messages.docs.length})');
+    
     if (updateCount > 0) {
       await batch.commit();
+      debugPrint('✅ markThreadAsRead: Batch committed successfully');
+    } else {
+      debugPrint('📬 markThreadAsRead: No messages needed updating (all already read)');
     }
   }
 

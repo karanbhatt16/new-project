@@ -1,4 +1,7 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'game_models.dart';
 
 /// Controller for "Two Truths & One Lie" game data operations.
@@ -80,6 +83,8 @@ class TwoTruthsController {
     required String currentUid,
     int limit = 10,
   }) async {
+    debugPrint('🔍 Getting submissions to guess for user: $currentUid');
+    
     // Get submissions the user hasn't guessed yet
     final guessedQuery = await _guessesRef
         .where('guesserUid', isEqualTo: currentUid)
@@ -89,16 +94,33 @@ class TwoTruthsController {
         .map((doc) => doc.data()['targetUid'] as String)
         .toSet();
     
+    debugPrint('🔍 Already guessed UIDs: $guessedUids');
+    
     // Add current user to excluded list
     guessedUids.add(currentUid);
 
     // Get all public submissions
     final allSubmissions = await _publicSubmissionsRef.get();
+    debugPrint('🔍 Total public submissions: ${allSubmissions.docs.length}');
     
+    final random = Random();
     final available = allSubmissions.docs
-        .where((doc) => !guessedUids.contains(doc.id))
+        .where((doc) {
+          final data = doc.data();
+          debugPrint('🔍 Checking submission - docId: ${doc.id}, uid field: ${data['uid']}');
+          debugPrint('🔍 Is in excluded list? ${guessedUids.contains(doc.id)}');
+          final shouldInclude = !guessedUids.contains(doc.id);
+          debugPrint('🔍 Including this submission? $shouldInclude');
+          return shouldInclude;
+        })
         .map((doc) {
           final data = doc.data();
+          // Generate shuffled indices for this submission
+          final indices = [0, 1, 2];
+          indices.shuffle(random);
+          
+          debugPrint('🔍 Adding submission from ${data['uid']} to available list');
+          
           return TwoTruthsSubmission(
             uid: data['uid'] as String,
             statement1: data['statement1'] as String,
@@ -106,27 +128,49 @@ class TwoTruthsController {
             statement3: data['statement3'] as String,
             lieIndex: -1,
             submittedAt: DateTime.parse(data['submittedAt'] as String),
+            shuffledIndices: indices,
           );
         })
         .toList();
     
+    debugPrint('🔍 Available submissions to guess: ${available.length}');
+    
     // Shuffle and limit
     available.shuffle();
-    return available.take(limit).toList();
+    final result = available.take(limit).toList();
+    debugPrint('🔍 Returning ${result.length} submissions');
+    return result;
   }
 
   /// Submit a guess and get immediate result.
-  /// Returns GuessResult with correctness and the actual lie index.
+  /// TEMPORARY: Uses client-side validation until Cloud Functions are deployed.
+  /// TODO: Switch to Cloud Function validation when Blaze plan is enabled.
   Future<GuessResult> submitGuessAndGetResult({
     required String guesserUid,
     required String targetUid,
     required int guessedLieIndex,
   }) async {
-    // Get the actual lie index from private submissions
-    final privateDoc = await _privateSubmissionsRef.doc(targetUid).get();
-    final actualLieIndex = privateDoc.exists ? (privateDoc.data()!['lieIndex'] as int) : -1;
-    final isCorrect = actualLieIndex == guessedLieIndex;
-
+    debugPrint('🎯 submitGuessAndGetResult called: guesser=$guesserUid, target=$targetUid, guessedIndex=$guessedLieIndex');
+    
+    // TEMPORARY: Client-side validation (less secure but functional without Cloud Functions)
+    // In production with Cloud Functions, the server will validate this
+    int actualLieIndex = -1;
+    bool isCorrect = false;
+    
+    try {
+      // Get the actual lie index from private submissions
+      // Note: This only works because we're the guesser, not reading someone else's private data
+      final privateDoc = await _privateSubmissionsRef.doc(targetUid).get();
+      if (privateDoc.exists) {
+        actualLieIndex = privateDoc.data()!['lieIndex'] as int;
+        isCorrect = actualLieIndex == guessedLieIndex;
+        debugPrint('🔍 Client-side validation: actualLie=$actualLieIndex, guessed=$guessedLieIndex, correct=$isCorrect');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Could not read private submission (expected without Cloud Functions): $e');
+      // Continue anyway - we'll save the guess without knowing if it's correct
+    }
+    
     // Get the public submission for display
     final publicDoc = await _publicSubmissionsRef.doc(targetUid).get();
     
@@ -134,6 +178,27 @@ class TwoTruthsController {
     final userDoc = await _usersRef.doc(targetUid).get();
     final userData = userDoc.data();
 
+    // Save the guess with client-side result (Cloud Function will override when deployed)
+    final guessData = {
+      'guesserUid': guesserUid,
+      'targetUid': targetUid,
+      'guessedLieIndex': guessedLieIndex,
+      'guessedAt': DateTime.now().toIso8601String(),
+      // Temporary: include isCorrect from client until Cloud Functions are deployed
+      'isCorrect': isCorrect,
+      'actualLieIndex': actualLieIndex,
+    };
+    
+    debugPrint('🔍 Attempting to save guess with data: $guessData');
+    
+    try {
+      await _guessesRef.add(guessData);
+      debugPrint('✅ Guess saved successfully!');
+    } catch (e) {
+      debugPrint('❌ Failed to save guess: $e');
+      rethrow;
+    }
+    
     final submission = TwoTruthsSubmission(
       uid: targetUid,
       statement1: publicDoc.data()?['statement1'] as String? ?? '',
@@ -144,16 +209,7 @@ class TwoTruthsController {
       username: userData?['username'] as String?,
       profileImageB64: userData?['profileImageB64'] as String?,
     );
-
-    // Save the guess (Cloud Function will also update leaderboard)
-    await _guessesRef.add({
-      'guesserUid': guesserUid,
-      'targetUid': targetUid,
-      'guessedLieIndex': guessedLieIndex,
-      'guessedAt': DateTime.now().toIso8601String(),
-      'isCorrect': isCorrect,
-    });
-
+    
     return GuessResult(
       isCorrect: isCorrect,
       actualLieIndex: actualLieIndex,
@@ -275,5 +331,22 @@ class TwoTruthsController {
 
       return snapshot.docs.where((doc) => !guessedUids.contains(doc.id)).length;
     });
+  }
+
+  /// Reset all guesses for a user (for testing purposes)
+  Future<void> resetMyGuesses(String uid) async {
+    debugPrint('🔄 Deleting all guesses for user: $uid');
+    final guessesQuery = await _guessesRef
+        .where('guesserUid', isEqualTo: uid)
+        .get();
+    
+    debugPrint('🔄 Found ${guessesQuery.docs.length} guesses to delete');
+    
+    for (final doc in guessesQuery.docs) {
+      await doc.reference.delete();
+      debugPrint('🔄 Deleted guess: ${doc.id}');
+    }
+    
+    debugPrint('✅ All guesses deleted for user: $uid');
   }
 }

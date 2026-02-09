@@ -228,10 +228,28 @@ service cloud.firestore {
     }
 
     // -----------------------
-    // Games (Two Truths & One Lie, Would You Rather)
+    // Games (Two Truths & One Lie, Would You Rather, Run For Your Type)
     // -----------------------
     match /games {
       allow read, write: if false; // block wildcard
+    }
+
+    // Run For Your Type - Valentine's Day Game
+    match /valentine_game_submissions/{uid} {
+      // Users can read their own submission
+      allow read: if isMe(uid);
+      
+      // Users can read all submissions (needed for match calculation)
+      allow list: if signedIn();
+      
+      // Users can only create/update their own submission
+      allow create, update: if isMe(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.gender is string
+        && request.resource.data.aboutMeAnswers is list
+        && request.resource.data.preferredMatchAnswers is list;
+      
+      allow delete: if false;
     }
 
     // Two Truths & One Lie
@@ -243,20 +261,23 @@ service cloud.firestore {
       }
 
       // Private lie index only visible to owner
+      // TEMPORARY: Allow read by anyone (will be restricted when Cloud Functions are deployed)
       match /private_submissions/{uid} {
-        allow read, create, update, delete: if isMe(uid);
+        allow read: if signedIn(); // TEMPORARY: Should be isMe(uid) in production
+        allow create, update, delete: if isMe(uid);
       }
 
       // Guesses: users can create guesses for others; isCorrect is set by server Function only
       match /guesses/{guessId} {
         allow read: if signedIn();
+        // TEMPORARY: Allow client to include isCorrect and actualLieIndex until Cloud Functions are deployed
         allow create: if signedIn()
-          && request.resource.data.guesserUid == request.auth.uid
-          && request.resource.data.targetUid is string
-          && request.resource.data.guessedLieIndex is int
-          && !('isCorrect' in request.resource.data);
-        // No client updates/deletes
-        allow update, delete: if false;
+          && request.resource.data.guesserUid == request.auth.uid;
+        // Allow Cloud Functions to update with isCorrect and actualLieIndex
+        allow update: if false; // Will be changed to allow Cloud Function updates
+        // Allow users to delete their own guesses (for testing/reset)
+        allow delete: if signedIn()
+          && resource.data.guesserUid == request.auth.uid;
       }
 
       // Leaderboard: public read, server-only writes (use App Check or Functions service account)
@@ -270,20 +291,21 @@ service cloud.firestore {
     match /games/would_you_rather {
       // Game sessions
       match /sessions/{sessionId} {
-        // Anyone signed in can read sessions they're part of
-        allow read: if signedIn()
-          && (resource.data.player1Uid == request.auth.uid 
-              || resource.data.player2Uid == request.auth.uid);
+        // Anyone signed in can read sessions (needed to join via invite code)
+        // When joining, user needs to read the session first before becoming player2
+        allow read: if signedIn();
         
         // Allow creating a session if user is player1
         allow create: if signedIn()
           && request.resource.data.player1Uid == request.auth.uid;
         
-        // Allow updates if user is a participant
+        // Allow updates if:
+        // 1. User is already a participant (player1 or player2), OR
+        // 2. User is joining as player2 (player2Uid is null and being set to current user)
         allow update: if signedIn()
           && (resource.data.player1Uid == request.auth.uid 
               || resource.data.player2Uid == request.auth.uid
-              || resource.data.player1Uid == request.auth.uid);
+              || (resource.data.player2Uid == null && request.resource.data.player2Uid == request.auth.uid));
         
         allow delete: if false;
 
@@ -301,17 +323,19 @@ service cloud.firestore {
       }
 
       // Matchmaking queue
-      match /matchmaking_queue/{odWrwNFvMEVkD3NGHI1gKXdYkkD3} {
+      match /matchmaking_queue/{uid} {
         // Anyone can read the queue to find matches
         allow read: if signedIn();
         
         // Users can only add themselves to the queue
         allow create: if signedIn()
-          && request.resource.data.uid == request.auth.uid;
+          && request.resource.data.uid == request.auth.uid
+          && uid == request.auth.uid;
         
         // Users can only remove themselves from the queue
         allow delete: if signedIn()
-          && resource.data.uid == request.auth.uid;
+          && resource.data.uid == request.auth.uid
+          && uid == request.auth.uid;
         
         allow update: if false;
       }
@@ -343,10 +367,10 @@ service cloud.firestore {
       allow update, delete: if signedIn()
         && resource.data.createdByUid == request.auth.uid;
 
-      // allow signed-in users to update only likeCount/commentCount/updatedAt
+      // allow signed-in users to update only likeCount/commentCount/reportCount/updatedAt
       allow update: if signedIn()
         && request.resource.data.diff(resource.data).changedKeys()
-            .hasOnly(['likeCount', 'commentCount', 'updatedAt']);
+            .hasOnly(['likeCount', 'commentCount', 'reportCount', 'updatedAt']);
 
       match /likes/{likerUid} {
         allow read: if signedIn();
@@ -367,8 +391,12 @@ service cloud.firestore {
       }
 
       match /reports/{reportId} {
-        allow read: if false;
-        allow create: if signedIn();
+        allow read: if false; // Reports are private, only admins should read
+        allow create: if signedIn()
+          && request.resource.data.reportedByUid == request.auth.uid
+          && request.resource.data.reason is string
+          && reportId == request.auth.uid; // Report doc ID must match user ID (prevents duplicates)
+        allow update, delete: if false;
       }
     }
   }

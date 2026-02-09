@@ -59,6 +59,11 @@ class ConversationTile extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final hasUnread = unread > 0;
     
+    // Debug logging
+    if (hasUnread) {
+      debugPrint('🔴 ConversationTile: ${otherUser.username} has $unread unread messages - DOT SHOWING');
+    }
+    
     final subtitle = (lastMessageText != null && lastMessageText!.isNotEmpty) 
         ? lastMessageText! 
         : 'Say hi…';
@@ -66,16 +71,8 @@ class ConversationTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: hasUnread
-            ? theme.colorScheme.primary.withValues(alpha: 0.08)
-            : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white),
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: hasUnread
-            ? Border.all(
-                color: theme.colorScheme.primary.withValues(alpha: 0.2),
-                width: 1,
-              )
-            : null,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.04),
@@ -86,55 +83,43 @@ class ConversationTile extends StatelessWidget {
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Container(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: hasUnread
-                  ? Colors.green
-                  : theme.colorScheme.primary.withValues(alpha: 0.3),
-              width: hasUnread ? 2.5 : 2,
+        leading: UserAvatar(user: otherUser, radius: 24),
+        title: Row(
+          children: [
+            // Simple dot indicator for new messages
+            if (hasUnread)
+              Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            Expanded(
+              child: Text(
+                otherUser.username,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-          ),
-          child: UserAvatar(user: otherUser, radius: 24),
-        ),
-        title: Text(
-          otherUser.username,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w600,
-          ),
+          ],
         ),
         subtitle: Text(
           subtitle,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodySmall?.copyWith(
-            color: hasUnread
-                ? theme.colorScheme.onSurface.withValues(alpha: 0.8)
-                : theme.colorScheme.onSurface.withValues(alpha: 0.5),
-            fontWeight: hasUnread ? FontWeight.w500 : FontWeight.w400,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+            fontWeight: FontWeight.w400,
           ),
         ),
-        trailing: hasUnread
-            ? Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  unread > 99 ? '99+' : unread.toString(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              )
-            : Icon(
-                Icons.chevron_right,
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
-              ),
+        trailing: Icon(
+          Icons.chevron_right,
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+        ),
         onTap: onTap,
       ),
     );

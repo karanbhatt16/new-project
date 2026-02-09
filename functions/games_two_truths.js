@@ -33,8 +33,11 @@ exports.onTwoTruthsGuessCreated = functions.firestore
       const lieIndex = privateSnap.data().lieIndex;
       const isCorrect = lieIndex === guessedLieIndex;
 
-      // Update guess doc with correctness (may already be set by client, but ensure server truth)
-      await snapshot.ref.update({ isCorrect });
+      // Update guess doc with correctness and actual lie index
+      await snapshot.ref.update({ 
+        isCorrect,
+        actualLieIndex: lieIndex
+      });
 
       // Update leaderboard counters for guesser
       const guesserLbRef = db.collection('games').doc('two_truths_one_lie').collection('leaderboard').doc(guesserUid);

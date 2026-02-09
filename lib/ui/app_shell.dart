@@ -9,7 +9,6 @@ import 'pages/messages_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/notifications_page.dart';
 import 'pages/voice_call_page.dart';
-import 'widgets/app_download_banner.dart';
 
 import '../games/games_hub_page.dart';
 
@@ -324,10 +323,9 @@ class _AppShellState extends State<AppShell> {
 
     final isDark = theme.brightness == Brightness.dark;
     
-    return AppDownloadBanner(
-      child: Scaffold(
-        extendBody: true,
-        appBar: AppBar(
+    return Scaffold(
+      extendBody: true,
+      appBar: AppBar(
         elevation: 0,
         scrolledUnderElevation: 0,
         backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.95),
@@ -480,7 +478,6 @@ class _AppShellState extends State<AppShell> {
             ),
           );
         },
-      ),
       ),
     );
   }

@@ -11,6 +11,7 @@ class TwoTruthsSubmission {
     required this.submittedAt,
     this.username,
     this.profileImageB64,
+    this.shuffledIndices,
   });
 
   final String uid;
@@ -21,8 +22,21 @@ class TwoTruthsSubmission {
   final DateTime submittedAt;
   final String? username;
   final String? profileImageB64;
+  final List<int>? shuffledIndices; // Randomized order for display [0,1,2] shuffled
 
   List<String> get statements => [statement1, statement2, statement3];
+  
+  /// Get statements in shuffled order for guessing
+  List<String> get shuffledStatements {
+    if (shuffledIndices == null) return statements;
+    return shuffledIndices!.map((i) => statements[i]).toList();
+  }
+  
+  /// Convert a shuffled index back to original index
+  int getOriginalIndex(int shuffledIndex) {
+    if (shuffledIndices == null) return shuffledIndex;
+    return shuffledIndices![shuffledIndex];
+  }
 
   TwoTruthsSubmission copyWith({
     String? uid,
@@ -33,6 +47,7 @@ class TwoTruthsSubmission {
     DateTime? submittedAt,
     String? username,
     String? profileImageB64,
+    List<int>? shuffledIndices,
   }) => TwoTruthsSubmission(
     uid: uid ?? this.uid,
     statement1: statement1 ?? this.statement1,
@@ -42,6 +57,7 @@ class TwoTruthsSubmission {
     submittedAt: submittedAt ?? this.submittedAt,
     username: username ?? this.username,
     profileImageB64: profileImageB64 ?? this.profileImageB64,
+    shuffledIndices: shuffledIndices ?? this.shuffledIndices,
   );
 
   Map<String, dynamic> toMap() => {
